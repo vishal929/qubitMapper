@@ -1,0 +1,74 @@
+Data Needed:
+	1) every node in the architecture and its degree	
+	2) every node in the circuit and its degree (thinking about the circuit as bidirectional instead of unidirectional)
+	3) List of edges in the architecture
+	4) List of edges in circuit (thinking of it as bidirectional)
+
+Algo:
+	1)Get the lowest degree of any node in the circuit
+		1a) Remove every architecture node from the coupling that has degree lower than this min 
+			(because they will not contribute to the matching) 
+		1b) Check if there are at least as many architecture Nodes remaining as Circuit nodes. If not, then no perfect initial matching is possible
+	2) Sort a copy of both architectureNodeDegree list and circuitNodeDegree list
+		2a) Point a finger to the start of both lists
+		2b) if the circuit node has degree <= degree of architecture node: increment both pointers
+			otherwise, increment the architecture pointer	
+		2c) after process repeated, check if circuit finger is at the end of the circuit list
+			if not, then no perfect initial matching is possible
+	3) This is the big initial matching algorithm. Entire below section dedicated to explanation
+
+Data Initialized: 
+	1)List of Pair<int,int> (q,Q) matchingStructure: representation where left int is the logical qubit and the right int is the physical qubit
+	2)LastMapping: Vector that keeps track of all our mappings so far
+	3)mapping, archMapping: total mapping maintained for both circuit nodes and architecture nodes (if a node,i, is not mapped, then mapping[i]/archMapping[i] holds the value -1)
+	4)levelIterators: Vector that holds iterators to the start of each round of matching in our List
+	5) bestMappingSoFar: Vector that holds the best mapping we have encountered so far (this is to receive a good initial mapping, even if a perfect initial mapping is impossible)
+
+Algo for Actual Matching (pseudocode):
+	beforeLoop: push pairs of a circuit node against every architecture node into the matchingStructure
+			(my algo chooses the lowest degree circuit node to push first)
+	while matchingStructure not empty:
+		firstPair = matchingStructure.pop()	
+		if firstPair is the last item from the last round of matching:
+			if lastMapping.size() > bestMappingSoFar:
+				bestMappingSoFar=lastMapping
+			do backtracking logic to reverse the last mapping we set
+			continue
+		circNodeToMatch = firstPair.first
+		archNodeToMatch = firstPair.second
+		if (degree[circNodeToMatch]>degree[archNodeToMatch]):
+			# we cannot match these
+			continue 	
+		# so we could match these, but we have to see if circuit is still valid once we do		
+		#idea for validity, we go through all the circuit node neighbors
+			# if the neighbors are matched, they should be matched to mapping[circuitNodeToMatch]
+				# if not, then circuit specifications are violated
+		mapping[circNodeToMatch]=archNodeToMatch
+		archMapping[archNodeToMatch]=circNodeToMatch
+		if circuit specifications not satisfied:
+			# undoing mapping and continue
+			mapping[circNodeToMatch]=-1
+			archMapping[archNodeToMatch]=-1
+			continue
+		# if we reached here, then we have a successful matching so far	
+		push the above matching into lastMapping
+		push the iterator to this matching in matchingStruct to levelIterators
+		go through the last round of mapping candidates:
+			if any of the candidates do not have q or Q related to the chosen mapping this round:
+				# then we can just change their level instead of pushing a copy
+				remove them from that level and push them to the next level
+		push the unmatched neighbors of circNodeToMatch to the next level
+		# so the next level of matching considers unmatched neighbors of circNodeToMatch as well as candidates from the last round of matching that have nothing to do with the chosen matching in the current level
+		if (lastMapping.size()==numLogicalQubits):
+			# then we found a perfect initial matching
+			break
+	
+	now we either print the perfect matching or the best matching we found	
+	# idea for future taking latency into account:
+		if we find two initial matchings with the same size, we can pick the matching with lowest latencies to be our bestMatchingSoFar
+	
+
+	
+
+	
+	
