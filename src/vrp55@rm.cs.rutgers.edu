@@ -352,10 +352,10 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 
 		GateNode* toSatisfy = mappingQueue[gateReached + 1];
 
-		if (toSatisfy->control == -1) {
+		if (nextGate->control == -1) {
 			//single qubit gate
 			//we can just increment counter and skip
-			mappingStack.push(make_tuple(currMapping, mappedArchQubits, gateReached + 1));
+			mappingStack.push(make_pair(currMapping, gateReached + 1));
 			continue;
 		}
 
@@ -1260,7 +1260,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 //we check if all neighbors of the target in the hardware mapping are mapped already
 				//then we need to consider at least 1 swap in the cost (because there is no room to just assign the control mapping)
 			 bool allMapped = true;
-			 for (auto i = architectureEdges[toAppraise->target].begin();i != architectureEdges[toAppraise->target].end();i++) {
+			 for (auto i = architectureEdges[toAppraise->target];i != architectureEdges[toAppraise->target].end();i++) {
 				 if (mapping.find(*i) == mapping.end()) {
 					//then some neighbors is unmapped
 					 allMapped = false;
