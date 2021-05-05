@@ -124,8 +124,16 @@ int main(int argc, char** argv) {
 	//getting floyd warshall distance matrix
 	distanceMatrix = getPhysicalDistancesFloydWarshall(architectureEdges);
 
+	printf("CONFIRMING DISTANCE MATRIX!\n");
+	for (int i = 0;i<numPhysicalQubits;i++) {
+		for (int j = 0;j < numPhysicalQubits;j++) {
+			printf("PHYSICAL QUBIT %d is %d distance away from PHYSICAL QUBIT %d\n", i, distanceMatrix[i][j], j);
+		}
+	}
 			
-	//right now calling maximal mapper once for perfect mapping problem
+	/* TEST FOR PERFECT MAPPER */
+
+	/*
 	map<int, int> result = perfectMapper(architectureEdges, firstGates);
 	if (result.size() == 0) {
 		printf("no perfect mapping found!\n");
@@ -142,6 +150,29 @@ int main(int argc, char** argv) {
 		}
 		printf("\n");
 	}
+	*/
+
+	/* TEST FOR ALL MAXIMAL MAPPINGS*/
+	/*
+	queue<map<int, int>> maximalMappings = getMaximalMappings(firstGates, architectureEdges);
+
+	while (maximalMappings.size() > 0) {
+		map<int, int> mapping = maximalMappings.front();
+		maximalMappings.pop();
+		cout << "MAXIMAL MAPPING \n";
+		for (int i = 0;i < numLogicalQubits;i++) {
+			if (mapping.find(i) != mapping.end()) {
+				printf("%d, ", mapping[i]);
+			}
+			else {
+				printf("-1, ");
+			}
+		}
+		printf("\n");
+	}
+	*/
+
+	/*Test for swaps*/
 
 	
 
@@ -587,6 +618,15 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			//rollback 
 			copyArchitectureEdges=rollBack(changes, copyArchitectureEdges);
 			//undoing circuit node add and edges/degree
+			circuitEdges[chosen->control].erase(chosen->target);
+			circuitEdges[chosen->target].erase(chosen->control);
+			if (circuitEdges[chosen->control].size() == 0) {
+				circuitEdges.erase(chosen->control);
+			}
+
+			if (circuitEdges[chosen->target].size() == 0) {
+				circuitEdges.erase(chosen->target);
+			}
 
 			//we couldnt map the given gate, so we will push it to a list of nodes 
 			couldntMap.insert(chosen);
@@ -602,12 +642,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				GateNode* child = chosen->controlChild;
 				if (child->control == chosen->control){
 					//then we need to check target parent
-					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
+					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
 						startGates.push(child);
 					}
 				} else {
 					//then we need to check control parent
-					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
+					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
 						startGates.push(child);
 					}
 				}
@@ -618,13 +658,13 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				
 				if (child->control == chosen->target){
 					//then we need to check target parent
-					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
+					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
 						startGates.push(child);
 					}
 				} else {
 					
 					//then we need to check control parent
-					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
+					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
 						startGates.push(child);
 					}
 				}
@@ -661,6 +701,23 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		debugSet.insert(forMapping);
 		count++;
 	}
+
+	printf("CONFIRMING THE PRUNE!\n");
+	printf("HARDWARE EDGES!!!!\n");
+	for (auto z = copyArchitectureEdges.begin();z != copyArchitectureEdges.end();z++) {
+		for (auto p = z->second.begin();p != z->second.end();p++) {
+			printf("WE HAVE EDGE FROM HARDWARE QUBIT %d to HARDWARE QUBIT %d\n", z->first, *p);
+		}
+	}
+
+	printf("CIRCUIT EDGES!!!!\n");
+	for (auto z = circuitEdges.begin();z != circuitEdges.end();z++) {
+		for (auto p = z->second.begin();p != z->second.end();p++) {
+			printf("WE HAVE EDGE FROM LOGICAL QUBIT %d to LOGICAL QUBIT %d\n", z->first, *p);
+		}
+	}
+
+
 	//our stack is of the form <(control, pairing),(target,pairing)>
 	//stack < pair<pair<int, int>,pair<int,int>>> maximalMappingStack;
 	//using a queue to go gate by gate and extend our maximal mappings
@@ -692,6 +749,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				//we need to check the neighbors of this qubit for possible "target" mappings
 				for (auto i = (iter->second).begin();i!=(iter->second).end();i++){
 					if (copyArchitectureEdges[*i].size()>= circuitEdges[target].size()){
+						printf("REACHED VERY INNER PART!\n");
 						//then this is a possible mapping for the target logical qubit
 						map<int, int> suggestedInitialMapping;
 						set<int> mappedArchitectureQubits;
@@ -711,7 +769,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			iter++;
 		}
 	}
-	
+	printf("INITIAL QUEUE SIZE: %lu\n", maximalMappingQueue.size());
 	//starting mapping loop
 	//keeping track of the best mappings at end of every step
 	unsigned int lastMapped =1;
@@ -916,7 +974,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		if (get<2>(queueEntry).size() < mostMatched) {
 			continue;
 		}
-
+		
 		set<GateNode*> completedGates = get<2>(queueEntry);
 		set<GateNode*> finalSet;
 		for (auto j = otherClosedSet.begin();j != otherClosedSet.end();j++) {
@@ -936,6 +994,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 	//now our maximalMappingQueue holds all the generated partial mappings, we have to do some cleanup to get the best ones
 		//in addition, we need to do some setup for the future initial gates to consider (because we will run this method multiple times)
 	//returning the best partial mappings, and the gates for the next iteration are already modified in firstGates
+	printf("RETURNING RESULTS!\n");
 	return results;
 	
 }
@@ -1134,7 +1193,12 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  //creating an initial array of distances of the shortest distance between any 2 physical qubits
  vector<vector<int>> getPhysicalDistancesFloydWarshall(map<int,set<int>> architectureEdges) {
 		//we run the vector based floyd warshall algorithm here for shortest distances	
-	 vector<vector<int>> distances(architectureEdges.size(), vector<int>(architectureEdges.size(),UINT_MAX));
+	 //initially setting max to be # of edges in total
+	 int numEdges = 0;
+	 for (auto i = architectureEdges.begin();i != architectureEdges.end();i++) {
+		 numEdges += (i->second).size();
+	 }
+	 vector<vector<int>> distances(architectureEdges.size(), vector<int>(architectureEdges.size(),numEdges));
 
 	 //setting up the algorithm
 	 for (auto i = architectureEdges.begin();i != architectureEdges.end();i++) {
@@ -1816,7 +1880,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			//all these swaps are printed/written to the output
 		 for (auto z = parallelizedSwaps.begin();z != parallelizedSwaps.end();z++) {
 			 for (auto y = (*z).begin();y != (*z).end();y++) {
-				 cout << "swp q[" << y->first << "], q[" << y->second << "];\n"
+				 cout << "swp q[" << y->first << "], q[" << y->second << "];\n";
 			 }
 		 }
 
@@ -1841,12 +1905,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  queue<map<int, int>> getMaximalMappings(set<GateNode*> startGates,map<int,set<int>> architectureEdges) {
 	 set<GateNode*> nextGates = startGates;
 	 queue<map<int, int>> resultQueue;
+	 int count = 1;
 	 do {
+		 printf("ON ITERATION %d\n", count);
 		vector <tuple<map<int, int>, set<int>, set<GateNode*>> > result = maximalMapper(architectureEdges,nextGates);
+		printf("FINISHED MAPPING THIS SEGMENT WITH NUM MAPPINGS %u!\n",result.size());
 		map<int, int> mapping = get<0>(result[0]);
 		nextGates = get<2>(result[0]);
 		resultQueue.push(mapping);
-
+		count++;
 	 } while (nextGates.size() > 0);
 
 	 //now resultQueue holds all the maximal mappings for the entire circuit, in order
@@ -1867,7 +1934,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 for (auto i = currentLevel.begin();i != currentLevel.end();i++) {
 				 GateNode* toConsider = *i;
 				 string swap = "swp";
-				 if (!strcmp(toConsider->name, swap.c_str())) {
+				 if (!strcmp((toConsider->name).c_str(), swap.c_str())) {
 					 //then we push this gate to our swaps set
 					 swaps.insert(toConsider);
 				 }
