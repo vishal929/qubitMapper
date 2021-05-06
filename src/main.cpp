@@ -9,13 +9,17 @@ using namespace std;
 //adding the below include for unordered_set for closed set implementation and for built in NlogN sort on vectors
 //adding unordered_map for multimap implementation of quick lookup of edge neighbors
 #include <unordered_set>
+//for fast vector sort
 #include <algorithm>
 #include <unordered_map>
 #include <list>
 #include <queue>
 #include <map>
 #include <deque>
+
 #include <climits>
+//for priority queue
+#include <functional>
 
 //if smart is defined, we will use a distance matrix instead of going through bfs every time
 int SMART = 1;
@@ -30,11 +34,32 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges);
  map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*> startSet);
  queue<map<int, int>> getMaximalMappings(set<GateNode*> startGates, map<int, set<int>> architectureEdges);
  vector<vector<int>> getPhysicalDistancesFloydWarshall(map<int, set<int>> architectureEdges);
+ int partialMappingStitchingCost(map<int, int> firstMap, map<int, int> secondMap, vector<vector<int>> distanceMatrix, map<int, set<int>> architectureEdges);
+ int partialMappingCost(map<int, int> mapping, set<GateNode*> remainingGates, vector<vector<int>> distanceMatrix, map<int, set<int>> architectureEdges);
+ pair<map<int, int>, vector<pair<int, int>>> stitchMappings(pair<map<int, int>, set<int>> mapOne, pair<map<int, int>, set<int>> mapTwo, map<int, set<int>> architectureEdges);
 
 //global distance matrix
  vector<vector<int>> distanceMatrix;
 
+ struct PriorityData {
+	 int cost;
+	 vector<pair<int, int>> swapsTaken;
+	 map<int, int> initialMapping;
+	 map<int, int> transformedMapping;
 
+	 PriorityData(int first, vector<pair<int, int>> second, map<int, int> third, map<int, int> fourth) {
+		 cost = first;
+		 swapsTaken = second;
+		 initialMapping = third;
+		 transformedMapping = fourth;
+	 }
+	
+	 //reversing this operator because we want a min queue
+	 bool operator<(const struct PriorityData& toCompare) const{
+		 return cost > toCompare.cost; 
+	 }
+
+ };
 
 
 int main(int argc, char** argv) {
@@ -124,12 +149,15 @@ int main(int argc, char** argv) {
 	//getting floyd warshall distance matrix
 	distanceMatrix = getPhysicalDistancesFloydWarshall(architectureEdges);
 
+	/*TEST FOR DISTANCE CORRECTNESS*/
+	/*
 	printf("CONFIRMING DISTANCE MATRIX!\n");
 	for (int i = 0;i<numPhysicalQubits;i++) {
 		for (int j = 0;j < numPhysicalQubits;j++) {
 			printf("PHYSICAL QUBIT %d is %d distance away from PHYSICAL QUBIT %d\n", i, distanceMatrix[i][j], j);
 		}
 	}
+	*/
 			
 	/* TEST FOR PERFECT MAPPER */
 
@@ -173,9 +201,33 @@ int main(int argc, char** argv) {
 	*/
 
 	/*Test for swaps*/
-
+	map<int, int> mapOne;
+	set<int> mappedOne;
+	mapOne[0] = 2;
+	mappedOne.insert(2);
+	mapOne[1] = 0;
+	mappedOne.insert(0);
+	mapOne[2] = 1;
+	mappedOne.insert(1);
+	mapOne[3] = 3;
+	mappedOne.insert(3);
+	map<int, int> mapTwo;
+	set<int> mappedTwo;
+	mapTwo[1] = 0;
+	mappedTwo.insert(0);
+	mapTwo[2] = 1;
+	mappedTwo.insert(0);
+	mapTwo[3] = 2;
+	mappedTwo.insert(0);
 	
 
+	pair<map<int,int>,vector<pair<int, int>>> swapFinderResult = stitchMappings(make_pair(mapOne,mappedOne),make_pair(mapTwo,mappedTwo),architectureEdges);
+	
+	map<int, int> newInitialMapping = swapFinderResult.first;
+	vector<pair<int, int>> swaps = swapFinderResult.second;
+	for (auto i = swaps.begin();i != swaps.end();i++) {
+		printf("SWAP BETWEEN %d and %d\n", i->first, i->second);
+	}
 	//Exit the program:
 	return 0;
 }
@@ -1345,15 +1397,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 		 if (toAppraise->controlChild != NULL ) {
 				//then we need to check if target parent is in the closedSet or not for insertion (so we enforce level order)
-				if (closedSet.find((toAppraise->controlChild)->targetParent) != closedSet.end()) {
+				if (closedSet.find((toAppraise->controlChild)->targetParent) != closedSet.end() || remainingGates.find((toAppraise->controlChild)->targetParent)==remainingGates.end()) {
 					//then we can add this child to the queue
 					remainingDependencies.push(toAppraise->controlChild);
 				}
 			}
 
-			if (toAppraise->targetChild != NULL ) {
+			if (toAppraise->targetChild != NULL && toAppraise->targetChild != toAppraise->controlChild) {
 				//then we need to check if control parent is in the closedSet or not for insertion (so we enforce level order)
-				if (closedSet.find((toAppraise->targetChild)->controlParent) != closedSet.end()) {
+				if (closedSet.find((toAppraise->targetChild)->controlParent) != closedSet.end() || remainingGates.find((toAppraise->targetChild)->controlParent)!=remainingGates.end()) {
 					//then we can add this child to the queue
 					remainingDependencies.push(toAppraise->targetChild);
 				}
@@ -1381,6 +1433,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 maxDistance = calculatedDistance;
 			 }
 		}
+		 iter++;
 	 }
 	 //now we have the minimum # (lower bound) on swaps needed in order to transform a mapping into another mapping
 	 return maxDistance;
@@ -1408,30 +1461,74 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			//(think about a case where the initial mapping has an unmapped logical qubit where the target mapping has mapped that logical qubit)
 		//3) this is the queue of swaps taken (logicalQ_1, logicalQ_2)
 		//4) this is the transformed mapping 
+	 priority_queue<PriorityData> swapQueue;
+	 /*
 	 priority_queue<tuple<int,
 		 vector<pair<int,int>>,
 		 map<int,int>,
-		 map<int,int>>> swapQueue;
+		 map<int,int>>,vector<tuple<int,
+		 vector<pair<int,int>>,
+		 map<int,int>,
+		 map<int, int>>>, > swapQueue;
+		 */
 	 map<int, int> firstMap = mapOne.first;
+	 map<int, int> transformedMap = firstMap;
 	 set<int> firstArchMap = mapOne.second;
 	 map<int, int> secondMap = mapTwo.first;
 	 set<int> secondArchMap = mapTwo.second;
+
+	 for (auto j = transformedMap.begin();j != transformedMap.end();j++) {
+		 printf("INITIAL MAPPING %d mapped to %d\n", j->first, j->second);
+	 }
 	
 
 	 //enqueueing the base state
-	 swapQueue.push(make_tuple(partialMappingStitchingCost(firstMap, secondMap,distanceMatrix,architectureEdges), vector<pair<int, int>>(), firstMap, firstMap));
+	 printf("ENQUEING BASE STATE!\n");
+	 swapQueue.push(PriorityData(partialMappingStitchingCost(firstMap, secondMap,distanceMatrix,architectureEdges), vector<pair<int, int>>(), firstMap, transformedMap));
+	 int iterCount = 0;
 	 while (swapQueue.size() > 0) {
+		 printf("GOT INSIDE!\n");
 		//getting the lowest cost path from the queue
-		 tuple<int,vector<pair<int, int>>,map<int, int>,map<int, int>>  result = swapQueue.top();
+		 PriorityData result = swapQueue.top();
+		 //tuple<int,vector<pair<int, int>>,map<int, int>,map<int, int>>  result = swapQueue.top();
 		 swapQueue.pop();
-		 vector<pair<int, int>> swapsTaken = get<1>(result);
-		 map<int, int> initialMapping = get<2>(result);
-		 map<int, int> transformedMapping = get<3>(result);
+		 //vector<pair<int, int>> swapsTaken = get<1>(result);
+		 //map<int, int> initialMapping = get<2>(result);
+		 //map<int, int> transformedMapping = get<3>(result);
+		 //int currCost = get<0>(result);
+		 vector<pair<int, int>> swapsTaken = result.swapsTaken;
+		 map<int, int> initialMapping = result.initialMapping;
+		 map<int, int> transformedMapping = result.transformedMapping;
+	     int currCost = result.cost;		 
+		 printf("CURRENT TRANSFORMED MAPPING:\n");
+		 for (auto o = transformedMapping.begin();o != transformedMapping.end();o++) {
+			 printf("%d mapped to %d, ", o->first, o->second);
+		}
+		 printf("WITH COST: %d", currCost);
+		 printf("\n");
+		 //debug
+		 if (iterCount == 4) {
+			 break;
+		 }
 		 //checking equality 
-		 if (transformedMapping == secondMap) {
+		 bool equal = true;
+		 for (auto h = secondMap.begin();h != secondMap.end();h++) {
+			 if (transformedMapping.find(h->first) == transformedMapping.end()) {
+				 //then automatically not equal
+				 equal = false;
+				 break;
+			 }
+			 if (transformedMapping[h->first] != h->second) {
+				 //mapping not satisfied
+				 equal = false;
+				 break;
+			 }
+		 }
+		 if (equal) {
 			 //then we hit the end
 			 //returning the initial mapping, and list of swaps to take
-			 return make_pair(get<2>(result), get<1>(result));
+			 printf("FOUND MAPPING PATHWAY!\n");
+			 return make_pair(initialMapping, swapsTaken);
 		 }
 
 		 //else we need to think in terms of 1 swap granularities
@@ -1446,12 +1543,14 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 for (auto j = transformedMapping.begin();j != transformedMapping.end();j++) {
 			 if (secondMap.find(j->first) == secondMap.end()) {
 				 //then this qubit does not contribute to the next maximal mapping 
+				 printf("LOGICAL QUBIT %d DOES NOT CONTRIBUTE TO NEXT MAPPING!\n", j->first);
 				 continue;
 			 }
 			 if (transformedMapping[j->first] != secondMap[j->first]) {
+				 printf("CASE 1 NEED TO SWAP!\n");
 				 //will need to consider 1 swap applied to j->first or 1 swap applied to the logical qubit mapped to secondMap[j->first]
 				 // for loop below considering a single swap applied to logical qubit mapping j->first
-				 for (auto i = architectureEdges[transformedMapping[j->first]].begin();i != architectureEdges[transformedMapping[j->first]].end();j++) {
+				 for (auto i = architectureEdges[transformedMapping[j->first]].begin();i != architectureEdges[transformedMapping[j->first]].end();i++) {
 					 //need to check if this qubit is mapped to in the current mapping or not
 						//if so, we consider a swap with the associated logical qubit
 						//if not, then we check if there are qubits that are mapped in the result that are not mapped in current
@@ -1468,6 +1567,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 }
 
 					 if (nodePresent) {
+						 printf("REACHED EEEE!\n");
 						//then the edge is mapped in the current mapping to logical qubit z
 						//we modify our swaps, get the transformed mapping, update the cost and push back to our priority queue
 						 vector<pair<int, int>> newSwaps = swapsTaken;
@@ -1483,6 +1583,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 						 }
 						 //adding proposed swap to vector of swaps
 						 newSwaps.push_back(make_pair(associatedLogical, j->first));
+						 printf("CONSIDERING SWAP BETWEEN %d and %d\n", associatedLogical, j->first);
 						
 						 //getting the transformed mapping
 						 map<int, int> newTransformedMapping = transformedMapping;
@@ -1491,13 +1592,21 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 						 newTransformedMapping[associatedLogical] = transformedMapping[j->first];
 						 newTransformedMapping[j->first] = *i;
 
+						 //debug
+						 printf("CHECKING TRANSFORMED MAPPING!\n");
+						 for (auto p = newTransformedMapping.begin();p != newTransformedMapping.end();p++) {
+							 printf("%d mapped to %d, ", p->first, p->second);
+						 }
+						 printf("\n");
+
 						 //getting new cost of the swap pathway
 						 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
-						 
+						 printf("COST ASSIGNED OF %d\n", newCost);
 						 //pushing to queue
-						 swapQueue.push(make_tuple(newCost, newSwaps, initialMapping, newTransformedMapping));
+						 swapQueue.push(PriorityData(newCost, newSwaps, initialMapping, newTransformedMapping));
 					 }
 					 else {
+						 printf("CONSIDER SWAP FOR AN UNMAPPED NODE CASE 1\n");
 						//then the considered swap has a node that is not considered in the current mapping
 							//if there is a logical in the target mapping that is not mapped in the current mapping, we can modify our initial mapping here
 						      //otherwise, we continue
@@ -1507,9 +1616,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 								 //we have to modify our initial mapping to account for this
 								 map<int, int> newInitialMapping = initialMapping;
 								 newInitialMapping[b->first] = *i;
+								 printf("CHANGED INITIAL MAPPING -1\n");
 								 //updating swaps
 								 vector<pair<int, int>>  newSwaps = swapsTaken;
 								 newSwaps.push_back(make_pair(b->first, j->first));
+								 printf("CONSIDERING SWAP BETWEEN %d and %d\n", b->first, j->first);
 
 								 //transforming mapping
 								 map<int, int> newTransformedMapping = transformedMapping;
@@ -1518,9 +1629,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 								 //updating cost
 								 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
-
+								 printf("WITH COST %d\n", newCost);
 								 //pushing to queue
-								 swapQueue.push(make_tuple(newCost, newSwaps, newInitialMapping, newTransformedMapping));
+								 swapQueue.push(PriorityData(newCost, newSwaps, newInitialMapping, newTransformedMapping));
 							}
 						}
 
@@ -1543,6 +1654,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 }
 
 				 if (associatedLogicalQubit != -1) {
+					 printf("GOT HERE! with associatedLogicalQubit %d\n",associatedLogicalQubit);
 					 //then the physical qubit mapped to j->first in the target mapping has an associated logical qubit in the current mapping
 						//we can just consider all swaps on associatedLogicalQubit of distance 1 now
 					 for (auto z = architectureEdges[transformedMapping[associatedLogicalQubit]].begin();z != architectureEdges[transformedMapping[associatedLogicalQubit]].end();z++) {	
@@ -1554,17 +1666,20 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 							}
 						 }
 						 if (receivingSwapQubit==-1) {
+							 printf("OOOOH HERE!\n");
 							 //then the receiving physical qubit is not mapped by some logical qubit in the transformed Mapping 
 							 //we need to check if it needs to be assigned a mapping
 							 for (auto b = secondMap.begin();b != secondMap.end();b++) {
 								 if (transformedMapping.find(b->first) == transformedMapping.end()) {
 									 //then this is a logical qubit involved in the target mapping that is not in the current mapping
 									 //we have to modify our initial mapping to account for this
+									 printf("INITIAL MAPPING CHANGED 1!\n");
 									 map<int, int> newInitialMapping = initialMapping;
 									 newInitialMapping[b->first] = *z;
 									 //updating swaps
 									 vector<pair<int, int>>  newSwaps = swapsTaken;
 									 newSwaps.push_back(make_pair(associatedLogicalQubit, b->first));
+									 printf("CONSIDERING SWAP BETWEEN %d and %d\n", associatedLogicalQubit, b->first);
 
 									 //transforming mapping
 									 map<int, int> newTransformedMapping = transformedMapping;
@@ -1573,13 +1688,13 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 									 //updating cost
 									 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
-
+									 printf("WITH COST %d\n", newCost);
 									 //pushing to queue
-									 swapQueue.push(make_tuple(newCost, newSwaps, newInitialMapping, newTransformedMapping));
+									 swapQueue.push(PriorityData(newCost, newSwaps, newInitialMapping, newTransformedMapping));
 								}
 							}	 
-						 }
-						 else {
+						 } else {
+							 printf("OVER HEREEE!\n");
 							 //then we can just consider a swap between associatedLogicalQubit and receivingSwapQubit
 								//we should check first if the chosen swap was already done previously (dont want to be redundant)
 							 vector<pair<int, int>> newSwaps = swapsTaken;
@@ -1591,6 +1706,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 								 continue;
 							 }
 							 newSwaps.push_back(make_pair(associatedLogicalQubit, receivingSwapQubit));
+							 printf("CONSIDERING SWAP 1 BETWEEN %d and %d\n", associatedLogicalQubit, receivingSwapQubit);
 
 							 //transforming the mapping
 							 map<int, int> newTransformedMapping = transformedMapping;
@@ -1599,13 +1715,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 							 //getting new cost
 							 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
+							 printf("WITH COST %d\n", newCost);
 
 							 //pushing to priority queue
-							 swapQueue.push(make_tuple(newCost, newSwaps, initialMapping, newTransformedMapping));
+							 swapQueue.push(PriorityData(newCost, newSwaps, initialMapping, newTransformedMapping));
 						 }
 					 }
 				 }
 				 else {
+					 printf("OH NO!\n");
 					 //then we are in the case where target mapping has mapped a physical qubit that is not mapped to in the current mapping
 						//we might need to change the initial mapping here, if possible
 						//we might need to change the initial mapping here twice (for considering swaps of distance 1 where the target is not mapped!
@@ -1613,6 +1731,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 						 if (transformedMapping.find(z->first) == transformedMapping.end()) {
 							 //we found a logical qubit in the second mapping that is not mapped in the current mapping
 								//we can assign it the physical qubit  secondMap[j->first] in the initial mapping
+							 printf("INITIAL MAPPING CHANGED 2\n");
 							 map<int, int> newInitialMapping = initialMapping;
 							 newInitialMapping[z->first] = secondMap[j->first];
 							 map<int, int> newTransformedMapping = transformedMapping;
@@ -1641,14 +1760,16 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 											 //considering the swap
 											 vector<pair<int, int>> newSwaps = swapsTaken;
 											 newSwaps.push_back(make_pair(d->first, z->first));
+											 printf("CONSIDERING SWAP 2 BETWEEN %d and %d\n", d->first, z->first);
 
 											 newTransformedMapping[z->first] = *c;
 											 newTransformedMapping[d->first] = secondMap[j->first];
 
 											 //getting new cost
 											 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
+											 printf("WITH COST %d\n", newCost);
 
-											 swapQueue.push(make_tuple(newCost, newSwaps, newInitialMapping, newTransformedMapping));
+											 swapQueue.push(PriorityData(newCost, newSwaps, newInitialMapping, newTransformedMapping));
 										 }
 									}
 								 }
@@ -1656,6 +1777,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 									 //now we just consider a swap between these qubits
 									 vector<pair<int, int>> newSwaps = swapsTaken;
 									 newSwaps.push_back(make_pair(associatedQubit, z->first));
+									 printf("CONSIDERING SWAP 3 BETWEEN %d and %d\n", associatedQubit, z->first);
 
 									 //updating our transformed mapping
 									 newTransformedMapping[associatedQubit] = secondMap[j->first];
@@ -1663,9 +1785,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 									 //getting new cost
 									 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
-
+									 printf("WITH COST %d\n", newCost);
 									 //pushing this search node into the queue
-									 swapQueue.push(make_tuple(newCost, newSwaps, newInitialMapping, newTransformedMapping));
+									 swapQueue.push(PriorityData(newCost, newSwaps, newInitialMapping, newTransformedMapping));
 								 }
 							 }
 
@@ -1675,7 +1797,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 }
 		 }
-		 
+		 iterCount++;
 	 }
 	 return make_pair(map<int,int>(), vector<pair<int,int>>());
  }
