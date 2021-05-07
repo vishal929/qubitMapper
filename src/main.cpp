@@ -39,8 +39,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges);
  int partialMappingStitchingCost(map<int, int> firstMap, map<int, int> secondMap, vector<vector<int>> distanceMatrix, map<int, set<int>> architectureEdges);
  int partialMappingCost(map<int, int> mapping, set<GateNode*> remainingGates, vector<vector<int>> distanceMatrix, map<int, set<int>> architectureEdges);
  pair<map<int, int>, vector<pair<int, int>>> stitchMappings(pair<map<int, int>, set<int>> mapOne, pair<map<int, int>, set<int>> mapTwo, map<int, set<int>> architectureEdges);
-void lazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix);
+//void lazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix);
 void betterLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix);
+void optimalLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix);
 
 //global distance matrix
  vector<vector<int>> distanceMatrix;
@@ -71,7 +72,7 @@ void betterLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<Gate
 	 int cost;
 	 //keeping track of all the swaps between logical qubits done
 		//vector of vectors of sets of pairs. the sets represent all parallel swaps between mappings, and we might have more than 1
-	 vector<vector<set<pair<int, int>>>> swapsTaken;
+	 vector<vector<pair<int,int>>> swapsTaken;
 	 //keeping track of the initial mapping for the entire process
 	 map<int, int> initialMapping;
 	 //this is the next proposed mapping in the next layer of maximal mappings to stitch to
@@ -80,16 +81,16 @@ void betterLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<Gate
 	 map<int, int> transformedMapping;
 	//keeping track of which gate set we are at 
 	 set<GateNode*> firstGates;
-	 //keeping track of each section of end gates
-	 vector<set<GateNode*>> endingSections;
+	 //keeping track of each section of end gates for final printing
+	 vector<queue<GateNode*>> endingSections;
 
-	 SecondPriorityData(int first, vector<vector<set<pair<int, int>>>> second, map<int, int> third, map<int, int> fourth, map<int,int> fifth, set<GateNode*> gates, vector<set<GateNode*>> endings) {
-		 cost = first;
-		 swapsTaken = second;
-		 initialMapping = third;
-		 targetMapping = fourth;
-		 transformedMapping = fifth;
-		 firstGates = gates;
+	 SecondPriorityData(int heuristicCost,  vector<vector<pair<int,int>>> maximalPartitionSwaps, map<int, int> initialMap, map<int, int> targetMap, map<int,int> transformedMap, set<GateNode*> currentGates, vector<queue<GateNode*>> endings) {
+		 cost = heuristicCost;
+		 swapsTaken = maximalPartitionSwaps;
+		 initialMapping = initialMap;
+		 targetMapping = targetMap;
+		 transformedMapping = transformedMap;
+		 firstGates = currentGates;
 		 endingSections = endings;
 
 	 }
@@ -2184,6 +2185,132 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
  }
  */
+ //helper function to actually build a circuit given maximally mapped gates, swaps, and an initial mapping and print the results
+	//also prints the initial mapping, as requested
+ void buildCircuit(vector<queue<GateNode*>>,vector<vector<pair<int,int>>> levelSwaps,map<int,int> initialMapping) {
+	
+ }
+
+ //this is a swap optimal version of betterLazySwapCircuitBuilder
+ void optimalLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix) {
+	//using priority_queue to push down pathways
+	 priority_queue<SecondPriorityData> optimalQueue;
+
+	 //firstly enqueueing the basic arguments-> just the start set
+	 optimalQueue.push(SecondPriorityData(0, vector<vector<pair<int, int>>>(), map<int, int>(), map<int, int>(), map<int, int>(), startGates, vector<queue<GateNode*>>()));
+	 //below things are for when we break out of the search
+	 vector<vector<pair<int, int>>> optimalSwaps;
+	 map<int, int> initialMapping;
+	 vector<queue<GateNode*>> printQueue;
+	 while (optimalQueue.size() > 0) {
+		 SecondPriorityData pathway = optimalQueue.top();
+		 optimalQueue.pop();
+		 
+
+		 //we have 2 special cases -> first map is not set, second map is not set
+		 if (pathway.initialMapping.size() == 0) {
+			//need to find first mappings, update print queue
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(architectureEdges, pathway.firstGates);
+			 
+			 //considering every maximal mapping we get
+			 for (auto j = mappings.begin();j != mappings.end();j++) {
+				//building the first print queue
+				 queue<GateNode*> satisfied= getSatisfiedGates(pathway.firstGates, get<2>(*j));
+				 //we have an initial mapping and transformed mapping now
+				 map<int, int> newInitialMapping = get<0>(*j);
+				 //we enqueue all these initial pathways with cost 0, because we do not have a swap cost from a single mapping
+				 vector<queue<GateNode*>> toAdjust = pathway.endingSections;
+				 toAdjust.push_back(satisfied);
+				 //enqueueing
+				 optimalQueue.push(SecondPriorityData(0, pathway.swapsTaken, newInitialMapping, pathway.targetMapping, newInitialMapping, get<2>(*j), toAdjust));
+			 }
+			 continue;
+			 
+		 } 
+
+		 if (pathway.targetMapping.size() == 0) {
+			 //need to find deeper level of maximal mappings
+			 //now we can start updating the swap cost
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(architectureEdges, pathway.firstGates);
+			 for (auto j = mappings.begin();j != mappings.end();j++) {
+				 //building the print queue for this step
+				 queue<GateNode*> satisfied = getSatisfiedGates(pathway.firstGates, get<2>(*j));
+				 //updating the target mapping now
+				 map<int, int> newTargetMapping = get<0>(*j);
+				 vector<queue<GateNode*>> toAdjust = pathway.endingSections;
+				 toAdjust.push_back(satisfied);
+				 //getting cost
+					//cost only involves heuristic right now since we didnt do any swaps yet
+				 int cost = partialMappingStitchingCost(pathway.transformedMapping, newTargetMapping, distanceMatrix, architectureEdges);
+
+				 //enqueuing
+				 optimalQueue.push(SecondPriorityData(cost, pathway.swapsTaken, pathway.initialMapping, newTargetMapping, pathway.transformedMapping, get<2>(*j), toAdjust));
+			 }
+			 continue;
+		 }
+
+		 //then we stitch the transformed mapping and target mapping together
+			//if the next gates to start from is empty, we are done
+			//we found the optimal swap solution and we can get to printing
+		 pair<map<int,int>,vector<pair<int, int>>> newSwaps = stitchMappings(make_pair(pathway.transformedMapping, set<int>()), make_pair(pathway.targetMapping, set<int>()), architectureEdges);
+		 //adding the new swaps to the vector of layer swaps
+		 vector<vector<pair<int, int>>> layerSwaps = pathway.swapsTaken;
+		 layerSwaps.push_back(newSwaps.second);
+		 //seeing if we need to update our initial mapping and transformed mapping
+		 map<int, int> newInitialMapping = pathway.initialMapping;
+		 map<int, int> newTransformedMapping = pathway.transformedMapping;
+		 for (auto z = newSwaps.first.begin();z != newSwaps.first.end();z++) {
+			 if (newInitialMapping.find(z->first) == newInitialMapping.end()) {
+				 //then we update our initial mapping and transformed mapping
+				 newInitialMapping[z->first] = z->second;
+				 newTransformedMapping[z->first] = z->second;
+			 }
+		 }
+		 
+		 for (auto z = newSwaps.second.begin();z != newSwaps.second.end();z++) {
+			 //updating transformed mapping based on the swaps we did
+			 int tmp = newTransformedMapping[z->first];
+			 newTransformedMapping[z->first] = z->second;
+			 newTransformedMapping[z->second] = tmp;
+		 }
+
+		 //seeing if we are done or not!
+		 if (pathway.firstGates.size() == 0) {
+			 //then we are done! we found our swap pathway
+			 printQueue = pathway.endingSections;
+			 optimalSwaps = layerSwaps;
+			 initialMapping = newInitialMapping;
+			 //breaking from loop for printing
+			 break;
+		 }
+		 
+		 //else, we need to go a layer deeper in the search process
+		 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(architectureEdges, pathway.firstGates);
+		 
+		 for (auto z = mappings.begin();z != mappings.end();z++) {
+			 //building print queue
+			 queue<GateNode*> satisfied = getSatisfiedGates(pathway.firstGates, get<2>(*z));
+			 vector<queue<GateNode*>> toAdjust = pathway.endingSections;
+			 toAdjust.push_back(satisfied);
+			 //getting cost			 
+			 int numSwaps = 0;
+			 for (auto j = layerSwaps.begin();j != layerSwaps.end();j++) {
+				 numSwaps += (*j).size();
+			 }
+			 int cost = numSwaps + partialMappingStitchingCost(newTransformedMapping, get<0>(*z), distanceMatrix, architectureEdges);
+
+			 //enqueuing
+			 optimalQueue.push(SecondPriorityData(cost, layerSwaps, newInitialMapping, get<0>(*z), newTransformedMapping, get<2>(*z), toAdjust));
+		 }
+		 
+	 }
+
+	 //printing circuit logic
+	 if (initialMapping.size() != 0) {
+		 cout << "I THINK OPTIMAL WORKED!!!\n";
+	 }
+
+ }
 //lazy function to insert swaps (just tacks on parallelized swaps at the end of every maximal partition)
  void betterLazySwapCircuitBuilder(map<int,set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix) {
  //since our initial mapping varies until everything is mapped, we have to print out gates at the end
@@ -2361,6 +2488,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  }
 
  //lazy function to insert swaps (just tacks them on at the end of every maximal partition)
+ /*
  void lazySwapCircuitBuilder(map<int,set<int>> architectureEdges, set<GateNode*> startGates,vector<vector<int>> distanceMatrix) {
 	 set<GateNode*> nextGates = startGates;
 	 //set of gates to build on for building the actual circuit
@@ -2448,11 +2576,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 
 		 }
-		 /*
+		 
 		 if (count == 0) {
 			 pair<map<int,int>, set<int>> result = getBestResult(bestTuple);
 		 }
-		 */
+		 
 		 //getting swaps, if necessary
 		 if (get<0>(lastMapping).size() == 0) {
 			 //then there is no mapping to stitch to previously, we can replace
@@ -2571,10 +2699,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 for (auto i = initialMapping.begin();i != initialMapping.end();i++) {
 		 cout << "Logical qubit q" << i->first << " mapped to physical qubit Q" << i->second << " \n";
 	 }
- }
+ } */
 
 //swap optimal version of the lazy circuit builder
 	//this is swap optimal
+/*
  void lazySwapOptimalCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix) {
 	 
 	
@@ -2634,7 +2763,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  void optimalLatencyOrientedCircuitBuilder() {
 
  }
-
+*/
 
 
  //function to test my maximal mapper
