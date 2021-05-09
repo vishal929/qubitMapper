@@ -21,49 +21,82 @@ using namespace std;
 //for priority queue
 #include <functional>
 
-//if smart is defined, we will use a distance matrix instead of going through bfs every time
-int SMART = 1;
-//if latency is 1, we will try and gracefully insert swaps between maximal partitions
-int LATENCY= 1;
 
-int numLogical = 0;
 
-vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int, set<int>> architectureEdges, set<GateNode*> startSet);
+
+//this is a big part of my program. it will get partial mappings and the maximal circuit partitions they correspond to
+vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int, set<int>> architectureEdges, set<GateNode*> startSet,bool fast);
+
+//this is a helper function to tell us we cropped too many nodes in the maximalMapper, which means at the end of the level, we will get a maximal partition
 bool wentTooFar(map<int,set<int>> circuitEdges, map<int,set<int>>architectureEdges,int circuitMaxDegree, int architectureMaxDegree);
+
+//rolls back any changes we made while pruning the architecture in the maximal mapper
 map<int,set<int>> rollBack(queue<pair<int,int>>changes, map<int,set<int>>architectureEdges);
+
+//adds a gate edge to the counterpart circuit graph, which will help us prune the architecture graph
 map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges);
+
+//does the actual pruning for finding a mapping for the maximalMapper
  pair<queue<pair<int,int>>,map<int,set<int>>> pruneArchitectureEdges(map<int, set<int>>architectureEdges, unsigned int circuitMinDegree);
+
+ //implementation of a perfect mapper using dfs
  map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*> startSet);
+
+ //gets all maximalMappings of a circuit
  queue<map<int, int>> getMaximalMappings(set<GateNode*> startGates, map<int, set<int>> architectureEdges);
- vector<vector<int>> getPhysicalDistancesFloydWarshall(map<int, set<int>> architectureEdges);
+
+//calculates the maximum distance between any 2 qubits that are mapped in both mappings
  int partialMappingStitchingCost(map<int, int> firstMap, map<int, int> secondMap, map<pair<int,int>,int> distances, map<int, set<int>> architectureEdges);
+
+ //helper for deciding on a maximal partition to fill and pursue initially by deciding an estimated number of swaps based on the gates remaining
  int partialMappingCost(map<int, int> mapping, set<GateNode*> remainingGates, map<pair<int,int>,int> distances, map<int, set<int>> architectureEdges);
+
+ //Uses A* with partialMappingStitchingCost to find an optimal set of swaps to turn a full mapping into the second partial mapping
+	//this makes some optimizations for large benchmarks, just so they do not bog
  pair<map<int, int>, vector<pair<int, int>>> stitchMappings(pair<map<int, int>, set<int>> mapOne, pair<map<int, int>, set<int>> mapTwo, map<int, set<int>> architectureEdges,map<pair<int,int>,int> distances);
-//void lazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates, vector<vector<int>> distanceMatrix);
+
+ //this is my fast mapper (not guarunteed to be optimal)
 void betterLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates);
+
+//this is my optimal mapper. every maximal partition is pursued, every swap is considered with A* as the driver to get the best pathways, we pick the pathways with the least # of swaps
 void optimalLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates);
+
+//based on a filled mapping, it crops the architecture to only depend on those filled qubits
+	//i.e the new architecture will be an induced subgraph of the old architecture, but only with the mapped physical qubits
 map<int, set<int>> getCroppedArchitecture(map<int, int> filledMapping, map<int, set<int>> architectureEdges);
+
+//takes a partial mapping and gets all possible fillings for the unmapped qubits
 vector<map<int, int>> fillPartialMapping(map<int, int> mapping, map<int, set<int>> architectureEdges);
+
+//considers all possible fillings, and then uses partialMappingCost to decide the best one
 map<int, int> pickBestFilledMapping(map<int, int> mapping, map<int, set<int>> architectureEdges, set<GateNode*> remainingGates, map<pair<int,int>,int> distances);
+
+//gets the distances between every 2 physical qubits in the architecture provided as a parameter
 map<pair<int, int>, int> getDistances(map<int, set<int>> architectureEdges);
 int getNaiveDistance(map<int, set<int>> architectureEdges, int Q1, int Q2);
+
+//this is the pure optimal version of the stitchMappings function
+	// this will make no optimizations and considers all swap pathways using A* to stitch our mappings together
+	//there might be more than 1 set of swaps that accomplishes this, especially if both mappings are partial, so this is necessary to get an optimal solution
 vector<vector<pair<int, int>>> getSwapPathways(map<int, int> one, map<int, int> two, map<pair<int, int>, int> distances, map<int, set<int>> architectureEdges);
+
+//given a level in the given dependence structure, it gets the next level (the result gates do not depend on each other)
 set<GateNode*> getNextLevel(set<GateNode*> previousLevel);
 
+//fast mapper, but the circuit prints as mapping occurs, which helps saves up on total space compared to betterLazySwap
+void parallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArchitectureEdges, set<GateNode*> startGates);
 
-//global distance matrix
- //vector<vector<int>> distanceMatrix;
 
+ //priority queue data structure for swaps
+	//our cost function is numSwapsSoFar + partialMappingStitchingCost(currentMap, targetMap)
  struct PriorityData {
 	 int cost;
 	 vector<pair<int, int>> swapsTaken;
-	 //map<int, int> initialMapping;
 	 map<int, int> transformedMapping;
 
 	 PriorityData(int cost, vector<pair<int, int>> swapsTaken, map<int, int> transformedMapping) {
 		 this->cost = cost;
 		 this->swapsTaken = swapsTaken;
-		 //this.initialMapping = third;
 		 this->transformedMapping = transformedMapping;
 	 }
 	
@@ -75,6 +108,7 @@ set<GateNode*> getNextLevel(set<GateNode*> previousLevel);
  };
 
  //priority queue struct format for optimal swap pathway finder
+		//this is specifically for pushing down options in my optimal swap function
   struct SecondPriorityData {
 	  //cost of transforming from currentMapping to targetMapping 
 	 int cost;
@@ -109,8 +143,13 @@ set<GateNode*> getNextLevel(set<GateNode*> previousLevel);
 	 }
 
  };
+   //global to keep logical qubit number for ease
+   int numLogical = 0;
 
-
+  //we keep the latencies as globals, just for ease
+  int latencySingle;
+  int latencyDouble;
+  int latencySwap;
 
 
 int main(int argc, char** argv) {
@@ -137,7 +176,10 @@ int main(int argc, char** argv) {
 			assert(false);
 		}
 	}
-
+	//setting global latencies
+	latencySingle = latency1;
+	latencyDouble = latency2;
+	latencySwap = latencySwp;
 	//Build dependency graph for the quantum circuit's gates; put dependency graph's roots into a set
 	set<GateNode*> firstGates;
 	int numLogicalQubits = -1;
@@ -154,14 +196,9 @@ int main(int argc, char** argv) {
 	//student code goes here?
 
 	numLogical = numLogicalQubits;
-	//debug
-	//cout << "PRINTING COUPLING\n";
-	for (auto i = couplings.begin();i != couplings.end();i++) {
-		//printf("%d connected to %d\n", (*i).first, (*i).second);
-	}
+	
 
 	//creating a multimap for quick lookup of architecture edges
-	//multimap<int, int> architectureEdges ;
 	map<int,set<int>> architectureEdges;
 
 	//easy calculation of node degrees
@@ -191,7 +228,10 @@ int main(int argc, char** argv) {
 	/*Test for lazy circuit builder*/
 	//betterLazySwapCircuitBuilder(architectureEdges, firstGates);
 	/*optimal test*/
-	optimalLazySwapCircuitBuilder(architectureEdges, firstGates);
+	//optimalLazySwapCircuitBuilder(architectureEdges, firstGates);
+
+	//better fast test
+	parallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
 	//Exit the program:
 	return 0;
 }
@@ -208,10 +248,7 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		//printf("PRINTING DISTANCES!\n");
-		//for (auto i = distanceMap.begin();i != distanceMap.end();i++) {
-		//	printf("%d to %d has distance %d\n", i->first.first, i->first.second, i->second);
-		//}
+		
 		return distanceMap;
 	}
 
@@ -232,19 +269,16 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 	queue<GateNode*> startGates;
 	set<GateNode*> start = startSet;
 	while (start.size() > 0) {
-		////printf("current size: %d\n",start.size());
 		for (auto i = start.begin();i!=start.end();) {
 			
 			if (start.find((*i)->controlParent) == start.end() && start.find((*i)->targetParent) == start.end()) {
 				//then we add it into queue to get a level order
 				startGates.push((*i));
 				i=start.erase(i);
-				////printf("gate pushed!\n");	
 			} else{
 				i++;
 			}
 		}
-		////printf("exited loop!\n");
 	}
 
 	//going gate by gate through each level, adding edges and then checking if we went too far
@@ -254,7 +288,6 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 
 		GateNode* chosen = startGates.front();
 		startGates.pop();
-		////printf("Chosen gate: %d control and %d target\n",chosen->control,chosen->target);
 		if (closedSet.find(chosen) != closedSet.end()) {
 			//then we already saw this
 			continue;
@@ -267,7 +300,6 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 			closedSet.insert(chosen);
 			mappingQueue.push_back(chosen);
 			if (chosen->controlChild!=NULL){
-				////printf("ITS A TRAP!\n");
 			}
 			if (chosen->targetChild!=NULL){
 				GateNode* child = chosen->targetChild;
@@ -287,7 +319,6 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 			continue;
 		}
 		
-		////printf("starting add edge\n");
 		circuitEdges = addGateEdge(chosen, circuitEdges);
 		unsigned int circuitMinDegree=circuitEdges.size();
 		unsigned int circuitMaxDegree=0;
@@ -299,21 +330,16 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 				circuitMinDegree = (i->second).size();
 			}
 		}
-		////printf("starting prune edges\n");
 		pair<queue<pair<int,int>>,map<int,set<int>>> pruneRes = pruneArchitectureEdges(copyArchitectureEdges,circuitMinDegree);
 		queue<pair<int,int>> changes = pruneRes.first;
 		copyArchitectureEdges = pruneRes.second;
 
-		////printf("passed gateEdgeAdd and prune!\n");
-		////printf("sanity check: \n");	
-		////printf("min degree of circ is %d\n",circuitMinDegree);
 		unsigned int archMinDegree=copyArchitectureEdges.size();
 		for (auto i =copyArchitectureEdges.begin() ; i!=copyArchitectureEdges.end();i++){
 			if ((i->second).size() < archMinDegree){
 				archMinDegree = (i->second).size();
 			}
 		}
-		////printf("min degree of arch is %d\n",archMinDegree);
 		
 		
 		//suppose we went too far
@@ -328,7 +354,6 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 			}
 		}
 		if (wentTooFar(circuitEdges,copyArchitectureEdges,circuitMaxDegree,architectureMaxDegree)) {
-			////printf("GONE TOO FAR! MEANS NO PERFECT INITIAL MAPPING!\n");
 			//returning empty mapping
 			return map<int,int>();
 		}
@@ -518,20 +543,14 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 		//the second element is jsut a set of mapped architecture nodes --> for quick lookup
 		//the third element is the queue of gatenodes which could not be matched and should be considered the "start" for the next iteration
 		//this is returned so we can easily start the next iteration of mapping
-		//this may result in a maximal mapping that is not actually maximal, but it is faster for larger circuits
-vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int, set<int>> architectureEdges, set<GateNode*> startSet) {
+	//the last argument is boolean "fast". If fast is enabled, some speed optimizations are made for compatibility with the larger circuits
+	//this may result in a maximal mapping that is not actually maximal, but it is faster for larger circuits
+vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int, set<int>> architectureEdges, set<GateNode*> startSet,bool fast) {
 	//we first grab a copy of the coupling graph and associated nodeDegree vector
-	////printf("entered maximal mapper!\n");
-	//multimap<int, int> copyArchitectureEdges = architectureEdges;
-	//smart pointer copy of architectureEdges
+	
 	map<int,set<int>> copyArchitectureEdges =architectureEdges;
-	//map<int,int> copyArchitectureNodeDegrees = architectureNodeDegrees;
-
-	//allocating graph structure to add level by level in the dependence graph
-	//multimap<int, int> circuitEdges ;
-	//smart pointer to circuit graph
+	
 	map<int,set<int>> circuitEdges;
-	//map<int,int> circuitNodeDegrees ;
 
 
 	//keeping track of considered gates (we do not want to consider gates twice)
@@ -540,17 +559,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 	deque<GateNode*> mappingQueue;
 	//keeping track of gates whose requirements have been satisfied
 	set<GateNode*> mappingSet;
-	//vector<GateNode*> mappingQueue;
-	//set<GateNode*> mappingSet;
 	set<GateNode*> couldntMap;
 
 		
 	queue<GateNode*> startGates;
 	set<GateNode*> start = startSet;
-	////printf("input gates size: %d",startSet.size());
-	////printf("pushing start gates in order into queue!\n");
 	while (start.size() > 0) {
-		////printf("current size: %d\n",start.size());
 		for (auto i = start.begin();i!=start.end();) {
 
 			if (start.find((*i)->controlParent) != start.end() || start.find((*i)->targetParent) != start.end()) {
@@ -563,24 +577,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				i=start.erase(i);
 			}
 			
-			/*
-			if (start.find((*i)->controlParent) == start.end() && start.find((*i)->targetParent) == start.end()) {
-				//then we add it into queue to get a level order
-				startGates.push((*i));
-				i=start.erase(i);
-				////printf("gate pushed!\n");	
-			} else{
-				i++;
-			}
-			*/
+			
 		}
-		////printf("exited loop!\n");
 	}
 
 	//going gate by gate through each level, adding edges and then checking if we went too far
 	//big note here: gates in each level do not depend on each other, so we know we can always map level by level
-	////printf("Determining maximal possible mapping of gates!\n");
-	////printf("Starting size of startGates: %d!\n",startGates.size());
 	while (startGates.size() > 0) {
 		//adding the current level of the dependence graph to our circuit graph and updating node degrees
 
@@ -604,7 +606,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			closedSet.insert(chosen);
 			mappingQueue.push_back(chosen);
 			if (chosen->controlChild!=NULL){
-				////printf("ITS A TRAP!\n");
 			}
 			if (chosen->targetChild!=NULL){
 				GateNode* child = chosen->targetChild;
@@ -672,7 +673,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			continue;
 		}
 		
-		////printf("starting add edge\n");
 		circuitEdges = addGateEdge(chosen, circuitEdges);
 		unsigned int circuitMinDegree=circuitEdges.size();
 		unsigned int circuitMaxDegree=0;
@@ -684,21 +684,16 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				circuitMinDegree = (i->second).size();
 			}
 		}
-		////printf("starting prune edges\n");
 		pair<queue<pair<int,int>>,map<int,set<int>>> pruneRes = pruneArchitectureEdges(copyArchitectureEdges,circuitMinDegree);
 		queue<pair<int,int>> changes = pruneRes.first;
 		copyArchitectureEdges = pruneRes.second;
 
-		////printf("passed gateEdgeAdd and prune!\n");
-		////printf("sanity check: \n");	
-		////printf("min degree of circ is %d\n",circuitMinDegree);
 		unsigned int archMinDegree=copyArchitectureEdges.size();
 		for (auto i =copyArchitectureEdges.begin() ; i!=copyArchitectureEdges.end();i++){
 			if ((i->second).size() < archMinDegree){
 				archMinDegree = (i->second).size();
 			}
 		}
-		////printf("min degree of arch is %d\n",archMinDegree);
 		
 		
 		//suppose we went too far
@@ -713,7 +708,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			}
 		}
 		if (wentTooFar(circuitEdges,copyArchitectureEdges,circuitMaxDegree,architectureMaxDegree)) {
-			////printf("GONE TOO FAR!\n");
 			//rollback 
 			copyArchitectureEdges=rollBack(changes, copyArchitectureEdges);
 			//undoing circuit node add and edges/degree
@@ -730,7 +724,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			//we couldnt map the given gate, so we will push it to a list of nodes 
 			couldntMap.insert(chosen);
 			//we do not want to consider this gate again
-			//closedSet.insert(chosen);
 		}
 		else {
 			//then we can update (add children of the block to the queue
@@ -793,46 +786,23 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		mappingQueue.pop_front();
 		mappingQueue.push_back(forMapping);
 		if ((forMapping->controlParent !=NULL && debugSet.find(forMapping->controlParent)==debugSet.end()) || (forMapping->targetParent!=NULL && debugSet.find(forMapping->targetParent)==debugSet.end())){
-			//printf("ORDER NOT SATISFIED! for control %d and target %d\n",forMapping->control,forMapping->target);
 			if ((forMapping->controlParent !=NULL && forMapping->controlParent->control==-1) ||(forMapping->targetParent!=NULL && forMapping->targetParent->control==-1) ){
-				//printf("AS I SUSPECTED!\n");
 			}
 		}
 		debugSet.insert(forMapping);
 		count++;
 	}
 
-	////printf("CONFIRMING THE PRUNE!\n");
-	////printf("HARDWARE EDGES!!!!\n");
-	for (auto z = copyArchitectureEdges.begin();z != copyArchitectureEdges.end();z++) {
-		for (auto p = z->second.begin();p != z->second.end();p++) {
-			////printf("WE HAVE EDGE FROM HARDWARE QUBIT %d to HARDWARE QUBIT %d\n", z->first, *p);
-		}
-	}
 
-	////printf("CIRCUIT EDGES!!!!\n");
-	for (auto z = circuitEdges.begin();z != circuitEdges.end();z++) {
-		for (auto p = z->second.begin();p != z->second.end();p++) {
-			//printf("WE HAVE EDGE FROM LOGICAL QUBIT %d to LOGICAL QUBIT %d\n", z->first, *p);
-		}
-	}
-
-
-	//our stack is of the form <(control, pairing),(target,pairing)>
-	//stack < pair<pair<int, int>,pair<int,int>>> maximalMappingStack;
 	//using a queue to go gate by gate and extend our maximal mappings
-	//printf("starting actual isomorphism finding!\n");
 	queue < tuple<map<int, int>,set<int>, set<GateNode*>>> maximalMappingQueue;
 	//keeping track of where we are in the mapping
-	//set<GateNode*> otherClosedSet; 
 	
 	//we do the first iteration
 	GateNode* firstGate = mappingQueue.front();	
 	mappingQueue.pop_front();
-	//otherClosedSet.insert(firstGate);
 	int control = firstGate->control;
 	int target = firstGate->target;
-	//printf("now we hit gate with control %d and target %d\n",control,target);
 	if (control==-1){
 		//then we will just push an empty mapping onto the queue
 		map<int,int> emptyMapping;
@@ -849,7 +819,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				//we need to check the neighbors of this qubit for possible "target" mappings
 				for (auto i = (iter->second).begin();i!=(iter->second).end();i++){
 					if (copyArchitectureEdges[*i].size()>= circuitEdges[target].size()){
-						//printf("REACHED VERY INNER PART!\n");
 						//then this is a possible mapping for the target logical qubit
 						map<int, int> suggestedInitialMapping;
 						set<int> mappedArchitectureQubits;
@@ -869,14 +838,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			iter++;
 		}
 	}
-	//printf("GATES TO MAP SIZE: %lu\n", mappingQueue.size());
 	//starting mapping loop
 	//keeping track of the best mappings at end of every step
 	unsigned int lastMapped =1;
 	while (mappingQueue.size() > 0) {
 		GateNode* toSatisfy = mappingQueue.front();
 		mappingQueue.pop_front();
-		//printf("toSatisfy: %d control and %d target\n",toSatisfy->control,toSatisfy->target);
 		 	
 
 		//we go through all mappings in the queue and see if we can propogate them to the next gate
@@ -886,16 +853,14 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		//maybe do fast optimization here
 		//we should cut down on mappings to propogate in order to save on execution time
 		//this below step is just for the large benchmarks, without this, they balloon and use too much memory 
-		while (maximalMappingQueue.size() > 60000) {
+			//so with the fast flag enabled, this optimization is made
+		while (maximalMappingQueue.size() > 60000 && fast) {
 			//throwing out any element
 			maximalMappingQueue.pop();
 		}
 
 		unsigned int internalStep =0;
 		unsigned int size = maximalMappingQueue.size();
-		//cout << "CURRENT MAXIMAL MAPPING QUEUE SIZE: " << size << "\n";
-		//debug
-		//printf("queue size: %d\n",size);
 		while (size!=0) {
 			tuple<map<int, int>, set<int>, set<GateNode*>> queueEntry = maximalMappingQueue.front();
 			maximalMappingQueue.pop();
@@ -906,8 +871,8 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			set<int> mappedArchQubits = get<1>(queueEntry);
 			set<GateNode*> satisfiedGates = get<2>(queueEntry);
 			//need to throw out mapping if some conditions are not satisfied
-			//perfect mapping condition for now
-			if (satisfiedGates.size() <lastMapped){
+			//this optimization is only made for the large circuits
+			if (satisfiedGates.size() <lastMapped && fast){
 				//then we can safely throw this out for now because there are better mappings
 				
 				continue;
@@ -932,7 +897,6 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				//if so, we automatically consider it satisfied
 			if (toSatisfy->control==-1){
 				//automatically satisfied single qubit gate
-				////printf("AUTOMATICALLY SATISFIED!\n");
 				set<GateNode*> newSatisfied = satisfiedGates;	
 				newSatisfied.insert(toSatisfy);
 				if (newSatisfied.size()>internalStep){
@@ -1058,16 +1022,9 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		}
 		
 		//setting our new queue to be the result queue (we basically just pushed propagations to a new queue and now we are setting it as the old queue)
-		//maximalMappingQueue = resultMaximalMappingQueue;
-		//otherClosedSet.insert(toSatisfy);
 		//updating counter of number of mappings in best mapping so far
 		lastMapped = internalStep;
 	}
-	//printf("PRINTING GATES CONSIDERED IN THIS ROUND OF MAPPING:\n");
-	//for (auto z = otherClosedSet.begin();z != otherClosedSet.end();z++) {
-		//cout << "Gate name: " + (*z)->name << " control: " << (*z)->control << " target: " << (*z)->target <<"\n";
-	//}
-	//printf("FINISHED MAPPING DOING PREP NOW!\n");
 	vector <tuple<map<int, int>, set<int>, set<GateNode*>> > results;
 	queue <tuple<map<int, int>, set<int>, set<GateNode*>>> resultQueue;
 	unsigned int mostMatched = 0;
@@ -1094,34 +1051,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			numGatesMapped = completedGates.size();
 		}
 		set<GateNode*> finalSet;
-		/*
-		for (auto j = otherClosedSet.begin();j != otherClosedSet.end();j++) {
-			if (completedGates.find((*j)) == completedGates.end()) {
-				//then this wasnt mapped
-				//we need to see if its parents were mapped or not
-				finalSet.insert(*j);
-			}
-		}
-		*/
-		//i just put the couldntMap gates and children of completedGates into the nextGates set
-		//debug
-		/*
-		for (auto j = completedGates.begin();j != completedGates.end();j++) {
-			cout << "Gate with name " << (*j)->name << " on log qubits " << (*j)->control << ", " << (*j)->target << " completed \n";
-		}
-
-		for (auto j = completedGates.begin();j != completedGates.end();j++) {
-			if ((*j)->controlChild != NULL && completedGates.find((*j)->controlChild) == completedGates.end()) {
-				//we add this to the final set
-				finalSet.insert((*j)->controlChild);
-			}
-
-			if ((*j)->targetChild != NULL && completedGates.find((*j)->targetChild) == completedGates.end()) {
-				finalSet.insert((*j)->targetChild);
-			}
-		}
-		*/
-
+		
 		//going level by level and seeing what is left to map
 		set<GateNode*> toSkim = startSet;
 		while (toSkim.size() > 0) {
@@ -1136,32 +1066,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			}
 			toSkim = getNextLevel(toSkim);
 		}
-		/*
-		for (auto j = completedGates.begin();j != completedGates.end();j++) {
-			if ((*j)->controlChild != NULL) {
-				//checking if child is not in completed gates or couldnt map set
-					//NEED TO MAKE SURE THAT BOTH PARENTS ARE COMPLETED BEFORE INSERTING
-				if (completedGates.find((*j)->controlChild) == completedGates.end() && couldntMap.find((*j)->controlChild) == couldntMap.end()) {
-					if ((*j)->controlChild->targetParent == NULL || completedGates.find((*j)->controlChild->targetParent) != completedGates.end()) {
-						cout << "INSERTED TO FINAL SET:" << (*j)->name << " q" << (*j)->control << ", q" << (*j)->target << "\n";
-						finalSet.insert((*j)->controlChild);
-					}
-				}
-			}
-
-			if ((*j)->targetChild != NULL && (*j)->targetChild!=(*j)->controlChild) {
-				if (completedGates.find((*j)->targetChild) == completedGates.end() && couldntMap.find((*j)->targetChild) == couldntMap.end()) {
-					if((*j)->targetChild->controlParent==NULL || completedGates.find((*j)->targetChild->controlParent)!=completedGates.end())
-					cout << "INSERTED TO FINAL SET:" << (*j)->name << " q" << (*j)->control << ", q" << (*j)->target<<"\n";
-					finalSet.insert((*j)->targetChild);
-				}
-			}
-		}*/
-		/*
-		for (auto j = couldntMap.begin();j != couldntMap.end();j++) {
-			finalSet.insert(*j);
-		}
-		*/
+		
 		results.push_back(make_tuple(get<0>(queueEntry), get<1>(queueEntry), finalSet));
 
 	}
@@ -1169,14 +1074,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 	//now our maximalMappingQueue holds all the generated partial mappings, we have to do some cleanup to get the best ones
 		//in addition, we need to do some setup for the future initial gates to consider (because we will run this method multiple times)
 	//returning the best partial mappings, and the gates for the next iteration are already modified in firstGates
-	//printf("RETURNING RESULTS!\n");
-	cout << "Gates mapped: " << numGatesMapped << "\n";
-	cout << "COULDNT MAP SIZE! : " << couldntMap.size() << " \n";
-//	cout << "Gates Considered Size: " << otherClosedSet.size() << "\n";
-	printf("CHECKING FINAL SET!\n");
-	for (auto i = get<2>(results[0]).begin();i != get<2>(results[0]).end();i++) {
-		cout << "FINAL SET CONTAINS " << (*i)->name << " on qubits " << (*i)->control << ", " << (*i)->target << "\n";
-	}
+	
 	return results;
 	
 }
@@ -1372,46 +1270,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	//now all changes have been reverted
 }
 
- //creating an initial array of distances of the shortest distance between any 2 physical qubits
- vector<vector<int>> getPhysicalDistancesFloydWarshall(map<int,set<int>> architectureEdges) {
-		//we run the vector based floyd warshall algorithm here for shortest distances	
-	 //initially setting max to be # of edges in total
-	 printf("STARTING SETUP!\n");
-	 int numEdges = 0;
-	 for (auto i = architectureEdges.begin();i != architectureEdges.end();i++) {
-		 numEdges += (i->second).size();
-	 }
-	 vector<vector<int>> distances(architectureEdges.size(), vector<int>(architectureEdges.size(),numEdges));
-	 printf("FINISHED SETUP!\n");
 
-	 //setting up the algorithm
-	 for (auto i = architectureEdges.begin();i != architectureEdges.end();i++) {
-		 distances[i->first][i->first] = 0;
-		 for (auto j = (i->second).begin();j != (i->second).end();j++) {
-			 //distance 1 edges
-			 distances[i->first][*j] = 1;
-		 }
-	 }
-	 printf("FINISHED MORE SETUP!\n");
-	 //running full algo here:
-	 for (unsigned int i = 0;i < architectureEdges.size();i++) {
-		 for (unsigned int j = 0; j < architectureEdges.size();j++) {
-			 for (unsigned int z = 0; z < architectureEdges.size();z++) {
-				 if (distances[j][z] > distances[j][i] + distances[i][z]) {
-					 distances[j][z] = distances[j][i] + distances[i][z];
-				 }
-			}
-		 }
-	 }
-
-	 //returning distance matrix
-	 return distances;
-}
 
  //naive distance implementation for now for distance between 2 physical qubits
  int getNaiveDistance(map<int, set<int>> architectureEdges, int Q1, int Q2) {
 		//we basically just use bfs and get shortest distance
-	 //queue<pair<int,int>> distanceQueue;
 	 queue<int> distanceQueue;
 	 queue<int> tempQueue;
 	 set<int> closedSet;
@@ -1452,21 +1315,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 return 0;
  }
 
- //used alongside floyd warshall algorithm to generate the distance matrix
- int getSmartDistance(vector<vector<int>> distanceMatrix, int Q1, int Q2) {
-	 return distanceMatrix[Q1][Q2];
- }
-
- int getDistance(vector<vector<int>> distanceMatrix, map<int,set<int>> architectureEdges, int Q1, int Q2) {
-	 if (SMART) {
-		 return getSmartDistance(distanceMatrix, Q1, Q2);
-	 }
-	 else {
-		 return getNaiveDistance(architectureEdges, Q1, Q2);
-	 }
- }
-
-
 
 //helper to get my estimated partial mapping cost
  int partialMappingCost(map<int,int> mapping, set<GateNode*> remainingGates, map<pair<int,int>,int> distances, map<int,set<int>> architectureEdges) {
@@ -1493,7 +1341,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				//notice that this means that if the qubits are adjacent, then cost is incremented by 0, which means the gate can get right
 					//on its work with execution
 			 cost += distances.find(make_pair(mapping[toAppraise->control], mapping[toAppraise->target]))->second;
-			 //cost += getDistance(distanceMatrix, architectureEdges ,mapping[toAppraise->control], mapping[toAppraise->target]) - 1;
 		 }
 		 else if (mapping.find(toAppraise->control) != mapping.end()) {
 			 //then only control is mapped to some physical qubit
@@ -1562,7 +1409,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 if (secondMap.find(iter->first) != secondMap.end()) {
 			 //then this logical qubit (iter->first) is in both partial mappings
 			 int calculatedDistance = distances.find(make_pair(iter->second, iter->first))->second;
-			 //int calculatedDistance = getDistance(distanceMatrix, architectureEdges, firstMap[iter->first], secondMap[iter->first]);
 			 if ( calculatedDistance> maxDistance) {
 				 maxDistance = calculatedDistance;
 			 }
@@ -1644,18 +1490,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  }
 
 
- //optimal solver
-
- void optimalSwapSolver(map<int, set<int>> architectureEdges, set<GateNode*> startGates) {
-	 
-
- }
-
- 
-
- 
-
- 
 
  //function to get a list of swaps needed to transform one mapping to another
 	//returns as the first element of the pair the modified initial mapping (additional logical qubits mapped to mapOne, if necessary)
@@ -1669,12 +1503,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	  //priority queue of the next swap to take
 	  //the queue is the queue (order) of swaps to take
 		 //the map is the modified mapping with the swap
-	  //queue structure of tuple	
-		 //1) this is the cost function for pursuing this mapping, (cost of swaps taken + heuristic cost on transformed mapping)
-		 //2) this is the initial mapping, this is provided in case changes need to be made 
-			 //(think about a case where the initial mapping has an unmapped logical qubit where the target mapping has mapped that logical qubit)
-		 //3) this is the queue of swaps taken (logicalQ_1, logicalQ_2)
-		 //4) this is the transformed mapping 
+	   
 	 priority_queue<PriorityData> swapQueue;
 
 	 map<int, int> firstMap = mapOne.first;
@@ -1685,11 +1514,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 
 	 //enqueueing the base state
-	 //printf("ENQUEING BASE STATE!\n");
 	 swapQueue.push(PriorityData(partialMappingStitchingCost(firstMap, secondMap, distances, architectureEdges), vector<pair<int, int>>(), transformedMap));
 	 int iterCount = 0;
 	 while (swapQueue.size() > 0) {
-		 //printf("SIZE OF SWAP QUEUE: %d\n", swapQueue.size());
 
 		 while (swapQueue.size() > 60000 ) {
 			 //just an optimization to cut down on mappings "we think" are bad, especially useful for large benchmarks
@@ -1701,30 +1528,16 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 }
 			 swapQueue = tmp;
 		 }
-		  //printf("GOT INSIDE!\n");
 		 //getting the lowest cost path from the queue
 		 PriorityData result = swapQueue.top();
-		 //tuple<int,vector<pair<int, int>>,map<int, int>,map<int, int>>  result = swapQueue.top();
 		 swapQueue.pop();
-		 //vector<pair<int, int>> swapsTaken = get<1>(result);
-		 //map<int, int> initialMapping = get<2>(result);
-		// map<int, int> transformedMapping = get<2>(result);
-		 //int currCost = get<0>(result);
+		 
 		 vector<pair<int, int>> swapsTaken = result.swapsTaken;
-		 //map<int, int> initialMapping = result.initialMapping;
 		 map<int, int> transformedMapping = result.transformedMapping;
 		 
 		 int currCost = result.cost;
-		 //printf("CURRENT TRANSFORMED MAPPING:\n");
-		 //for (auto o = transformedMapping.begin();o != transformedMapping.end();o++) {
-			 //printf("%d mapped to %d, ", o->first, o->second);
-		 //}
-		 if (swapsTaken.size() != 0) {
-			 //printf("LAST CHOSEN SWAP WAS BETWEEN %d and %d with Cost %d\n", swapsTaken[swapsTaken.size() - 1].first, swapsTaken[swapsTaken.size() - 1].second, currCost);
-		 }
-		 //printf("WITH COST: %d", currCost);
-		 //printf("\n");
-		 //debug
+		 
+		 
 
 		 //checking equality 
 		 bool equal = true;
@@ -1739,24 +1552,14 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 if (equal) {
 			 //then we hit the end
 			 //returning the initial mapping, and list of swaps to take
-			 //printf("FOUND MAPPING PATHWAY!\n");
 			 return make_pair(firstMap, swapsTaken);
 		 }
 
 
-		 //else we need to think in terms of 1 swap granularities
-		 //we have some cases to think about:
-			//1) suppose a qubit exists in mapping 1 but not in mapping 2
-				//this is no issue because then this qubit does not contribute to the next section of the dependence graph
-			//2) suppose a logical qubit is mapped in mapping 2 but not in mapping 1
-				//then that logical qubit must be involved in an adjacent cnot gate
-				//therefore, we try mapping common qubits first, and as we consider swaps with unmapped neighbors, we assign qubits
-			//3) if a logical qubit is mapped in 1 and 2
-				//then we just consider possible swaps of distance 1 away that are close
+		//choosing the closer swaps 
 		 for (auto j = transformedMapping.begin();j != transformedMapping.end();j++) {
 			 if (secondMap.find(j->first) == secondMap.end()) {
 				 //then this qubit does not contribute to the next maximal mapping 
-				 //printf("LOGICAL QUBIT %d DOES NOT CONTRIBUTE TO NEXT MAPPING!\n", j->first);
 
 				 continue;
 			 }
@@ -1780,7 +1583,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 //doing the best Swap
 				 vector<pair<int, int>> newSwaps = swapsTaken;
 				 newSwaps.push_back(bestSwap);
-				 //printf("CONSIDERING SWAPPING %d and %d\n", i->first, j->first);
 
 				 //updating transformed mapping
 				 map<int, int> updatedMapping = transformedMapping;
@@ -1798,131 +1600,17 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 }
 	 return make_pair(map<int, int>(), vector<pair<int, int>>());
  }
-					/*
-						 
-						 if (firstDistance < secondDistance){
-							 //possible swap
+					
 
-							 //checking redundant
-							 if (swapsTaken.size() > 0) {
-								 pair<int, int> lastSwap = swapsTaken[swapsTaken.size() - 1];
-								 if ((lastSwap.first == i->first && lastSwap.second == j->first) || (lastSwap.first == j->first && lastSwap.second == i->first)) {
-									 //redundant swap
-									 continue;
-								 }
-							 }
-							 //not a redundant swap and we can enqueue
-							 vector<pair<int, int>> newSwaps = swapsTaken;
-							 newSwaps.push_back(make_pair(i->first, j->first));
-							 //printf("CONSIDERING SWAPPING %d and %d\n", i->first, j->first);
-
-							 //updating transformed mapping
-							 map<int, int> updatedMapping = transformedMapping;
-							 int tmp = updatedMapping[i->first];
-							 updatedMapping[i->first] = updatedMapping[j->first];
-							 updatedMapping[j->first] = tmp;
-
-							 //updating cost
-							 int cost = newSwaps.size() + partialMappingStitchingCost(updatedMapping, secondMap,distances, architectureEdges);
-
-							 //enqueueing
-							 swapQueue.push(PriorityData(cost, newSwaps, updatedMapping));
-							 
-
-							 //for fast mapper, we will only consider 1 swap at a time in the queue, or it baloons
-							 break;
-
-						 }
-					 }
-				 }
-			 }
-		 }
-	 }
-	 return make_pair(map<int, int>(), vector<pair<int, int>>());
- }
- */
-				 /*
-				 //printf("CASE 1 NEED TO SWAP!\n");
-				 //will need to consider 1 swap applied to j->first in order to move it closer to secondMap[j->first]
-					//of course this 1 swap needs to bring j->first closer to secondMap[j->first] or vice versa
-				 // for loop below considering a single swap applied to logical qubit mapping j->first
-				 for (auto i = architectureEdges[transformedMapping[j->first]].begin();i != architectureEdges[transformedMapping[j->first]].end();i++) {
-					 //need to check if this qubit is mapped to in the current mapping or not
-						//if so, we consider a swap with the associated logical qubit
-						//if not, then we check if there are qubits that are mapped in the result that are not mapped in current
-							//this is a possible assignment for them
-					 //is this physical qubit closer to secondMap[j->first] or not? 
-						//we only consider the swap if this is the case
-					 /*
-					 if (distanceMatrix[*i][secondMap[j->first]] >= distanceMatrix[transformedMapping[j->first]][secondMap[j->first]]) {
-						 //swap is useless
-						 continue;
-					 }
-					 */
-		/*
-					 bool nodePresent = false;
-					 int associatedLogical = -1;
-					 for (auto z = transformedMapping.begin();z != transformedMapping.end();z++) {
-						 //checking if *i is in here
-						 if (z->second == *i) {
-							 nodePresent = true;
-							 associatedLogical = z->first;
-							 break;
-						 }
-					 }
-
-					 if (nodePresent) {
-						 //printf("REACHED EEEE!\n");
-						//then the edge is mapped in the current mapping to logical qubit z
-						//we modify our swaps, get the transformed mapping, update the cost and push back to our priority queue
-						 vector<pair<int, int>> newSwaps = swapsTaken;
-						 if (newSwaps.size() > 0) {
-							
-							pair<int, int> lastSwapTaken = newSwaps[newSwaps.size() - 1];
-							 //checking  if the swap is redundant (reverses the previous swap)
-							// then this swap is useless and we can continue
-							if ((lastSwapTaken.first == associatedLogical && lastSwapTaken.second == j->first) || (lastSwapTaken.first == j->first && lastSwapTaken.second == associatedLogical)) {
-								//then the swap is redundant
-								continue;
-							}
-						 }
-						 //adding proposed swap to vector of swaps
-						 newSwaps.push_back(make_pair(associatedLogical, j->first));
-						 //printf("CONSIDERING SWAP BETWEEN %d and %d\n", associatedLogical, j->first);
-						
-						 //getting the transformed mapping
-						 map<int, int> newTransformedMapping = transformedMapping;
-
-						 //swapping the logical qubit assignments
-						 newTransformedMapping[associatedLogical] = transformedMapping[j->first];
-						 newTransformedMapping[j->first] = *i;
-
-						 //debug
-						 //printf("CHECKING TRANSFORMED MAPPING!\n");
-						 for (auto p = newTransformedMapping.begin();p != newTransformedMapping.end();p++) {
-							 //printf("%d mapped to %d, ", p->first, p->second);
-						 }
-						 //printf("\n");
-
-						 //getting new cost of the swap pathway
-						 int newCost = newSwaps.size() + partialMappingStitchingCost(newTransformedMapping, secondMap, distanceMatrix, architectureEdges);
-						 //printf("COST ASSIGNED OF %d\n", newCost);
-						 //pushing to queue
-						 swapQueue.push(PriorityData(newCost, newSwaps, newTransformedMapping));
-					 	  
-			 }
-		 }
-		 iterCount++;
-	 }
-	 return make_pair(map<int,int>(), vector<pair<int,int>>());
- }
-*/
  //goes through a pathway of swaps and returns a list of sets, where each set contains all the swaps that can occur at once
 	//this will help us generate circuits with lower hits to latency due to swaps
  vector<set<pair<int,int>>> parallelizeSwapPathway(vector<pair<int,int>> swapPathway) {
 	//idea: for each swap, go through every other swa	
 	 //idea: use a set to determine conflicts (since these swaps are in order)
 			//basic loop idea: go through the entire pathway, insert any swaps that do not conflict into a set
+	 //basic idea: start at a possible swap, any conflicting swap in the pathway must be in its own set, keep repeating 
+	 
+
 	 vector<set<pair<int, int>>> parallelizedSwaps;
 	 set<pair<int, int>> addingSet;
 	 set<int> currentSet;
@@ -1939,10 +1627,18 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 currentSet.insert(swap.first);
 				 currentSet.insert(swap.second);
 				 i = swapPathway.erase(i);
+				 
 			 }
 			 else {
 				 i++;
+				 currentSet.insert(swap.first);
+				 currentSet.insert(swap.second);
+				 
 			 }
+			if (currentSet.size() >= numLogical-1) {
+					 //cant possibly map more 
+					 break;
+			}
 		 }
 		 parallelizedSwaps.push_back(addingSet);
 		 //resetting the set
@@ -1965,14 +1661,12 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 queue<GateNode*> finalQueue;
 
 	 while (start.size() > 0) {
-			////printf("current size: %d\n",start.size());
 			for (auto i = start.begin();i!=start.end();) {
 				
 				if (start.find((*i)->controlParent) == start.end() && start.find((*i)->targetParent) == start.end()) {
 					//then we add it into queue to get a level order
 					orderQueue.push((*i));
 					i=start.erase(i);
-					////printf("gate pushed!\n");	
 				} else{
 					i++;
 				}
@@ -2052,16 +1746,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 printf("SOMETHING WENT WRONG HERE!\n");
 		 }
 	 }
-	 /*
-	 printf("PRINTING CROPPED ARCHITECTURE!\n");
-	 for (auto z = newArchitecture.begin();z != newArchitecture.end();z++) {
-		 printf("PHYSICAL QUBIT %d mappings: ", z->first);
-		 for (auto y = (z->second).begin();y != (z->second).end();y++) {
-			 printf(" %d, ", *y);
-		 }
-		 printf("\n");
-	 }
-	 */
+	 
 	 //returning this new architecture
 	 return newArchitecture;
  }
@@ -2106,24 +1791,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 		 if (i != gateMappings.size() - 1) {
 			 parallelizedSwaps = parallelizeSwapPathway(levelSwaps[i]);
-			// printf("SIZE OF OUR PARALLELIZED SWAP SETS: %d\n", parallelizedSwaps.size());
-			 //printf("GOING THROUGH PARALLELIZED SWAP SET:! \n");
-			 //for (auto j = parallelizedSwaps.begin();j != parallelizedSwaps.end();j++) {
-			//	 for (auto k = (*j).begin();k != (*j).end();k++) {
-			//		 printf("swp %d and %d, ", k->first, k->second);
-			//	 }
-			//	 printf("\n");
-			 //}
+			
 		 }
 
-		 //debug
-		 
-		 printf("PRINTING ALL GATES TO SCHEDULE!\n");
-		 for (auto j = toSchedule.begin();j != toSchedule.end();j++) {
-			 cout << (*j)->name << " between control: " << (*j)->control << " and target: " << (*j)->target << " \n";
-		 }
-		 
-				 
 		 //starting the scheduling
 		 int numTotalGates = toSchedule.size();
 		 int numSwapsAdded = 0;
@@ -2166,11 +1836,12 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 						 finished.find(toConsider->targetParent) != finished.end() ||
 						 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end())) &&
 						 ((toConsider->controlParent == NULL) || finished.find(toConsider->controlParent) != finished.end() ||
-							 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end()))) {
+							 (toSchedule.find(toConsider->controlParent) == toSchedule.end() && inProgress.find(toConsider->controlParent) == inProgress.end()))) {
 						 //then both parents are satisfied, lets try to map these qubits
 						 if (logicalSchedule[toConsider->target].second == -1 && logicalSchedule[toConsider->control].second == -1) {
 							 //then we can schedule this gate for both qubits
 							 logicalSchedule[toConsider->target] = make_pair(toConsider, latencyDouble);
+							 logicalSchedule[toConsider->control] = make_pair(toConsider, latencyDouble);
 							//removing this gate from schedule list
 							 inProgress.insert(toConsider);
 							 //removing gate from toSchedule
@@ -2201,7 +1872,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 //we check here if we can put in a swap or not
 				//if a space is empty and the two qubits are not in use and they will not be in use for the rest, then we can safely insert the swap
-			 //printf("STARTED SWAP CONSIDERATION!\n");
 			 if (i != gateMappings.size() - 1) {
 				
 				 //then we can consider swaps
@@ -2215,7 +1885,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 for (auto y = (*z).begin();y != (*z).end();) {
 						 //seeing if we can add a swap or not
 						 if (logicalSchedule[y->first].second == -1 && logicalSchedule[y->second].second == -1) {
-							 //printf("QUBITS ARE NOT IN USE!\n");
 							 //then we go through all the next gates to map and see if these 2 qubits are involved: if not, then we can go ahead	
 							 bool anyQubitInvolved = false;
 							 for (auto p = toSchedule.begin();p != toSchedule.end();p++) {
@@ -2231,17 +1900,14 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 							 }
 							 else {
 								 //then we can swap these qubits
-								 //printf("CULPRIT!\n");
 								 GateNode* newSwapGate = new(GateNode);
 								 newSwapGate->name = "swp";
 								 newSwapGate->target = y->second;
 								 newSwapGate->control = y->first;
 								 newSwapGate->targetParent = NULL;
 								 newSwapGate->controlParent = NULL;
-								 //printf("AHA!\n");
 
 								 //adding this gate to the schedule and removing it from this set
-								// printf("ADDED SWAP!\n");
 								 logicalSchedule[y->first] = make_pair(newSwapGate, latencySwap);
 								 logicalSchedule[y->second] = make_pair(newSwapGate, latencySwap);
 								 y = (*z).erase(y);
@@ -2251,7 +1917,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 								 //incrementing number of swaps added
 								 numSwapsAdded++;
 
-								// printf("MAYBE NOT?!\n");
 							 }
 						 }
 						 else {
@@ -2267,13 +1932,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 }
 					 else {
 						 //we can remove this and move on
-						 //printf("DID A REMOVE!\n");
 						 z = parallelizedSwaps.erase(z);
 					 }
 				 }
 			 }
 
-			// printf("GOT HERE!\n");
 
 			 //we have scheduled all that we can right now, let us move onto the decrement step for cycle logic
 				//we decrement all in progress gates by 1
@@ -2322,50 +1985,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					
 				}
 			 }
-			 /*
-			 for (auto z = logicalSchedule.begin();z != logicalSchedule.end();z++) {
-				 if (z->second > 0) {
-					 //then lets try decrementing this
-					 GateNode* work = z->first;
-					 int cyclesLeft = z->second;
-					 cyclesLeft--;
-					 if (cyclesLeft == 0) {
-						 //then this gate is done executing, we should remove it from the inProgress set and from logicalSchedule
-						 inProgress.erase(work);
-						 finished.insert(work);
-						 //if this gate is a swap gate, then we transform the mapping
-						 //need to make both logical and control qubits the dummy
-						 *z = make_pair(dummy, -1);
-						 if (work->name == "swp") {
-							 //we do the swap change
-							 //debug --> checking if swap is valid or not
-							 int physOne = toTransform[work->control];
-							 int physTwo = toTransform[work->target];
-							 
-							 if (architectureEdges[physOne].find(physTwo) == architectureEdges[physOne].end()) {
-								cout << "SOMETHING WENT TERRIBLY WRONG WITH MAPPING FOR SWAP!\n";
-							 }
-
-
-							 //doing the swap
-							 int tmp = toTransform[work->control];
-							 toTransform[work->control] = toTransform[work->target];
-							 toTransform[work->target] = tmp;
-						 }
-
-						 //printing the gate
-						 if (work->control == -1) {
-							 cout << work->name << " q[" << toTransform[work->target] << "] ; // formerly on logical qubit q[" << work->target << "]\n";
-						 }
-						 else {
-							 cout << work->name << " q[" << toTransform[work->control] << "], q[" << toTransform[work->target] << "] ; // between logical q[" << work->control << "], q[" << work->target << "]\n";
-						 }
-					 }
-				 }
-			 } */
+			 
 			 //cycle is over 
 			 numCycles++;
-			 //printf("PARALLELIZED SWAPS SET SIZE: %d\n", parallelizedSwaps.size());
 		 }
 		 
 	 }
@@ -2386,11 +2008,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 
 	 //enqueueing the base state
-	 //printf("ENQUEING BASE STATE!\n");
 	 swapQueue.push(PriorityData(partialMappingStitchingCost(firstMap, secondMap, distances, architectureEdges), vector<pair<int, int>>(), transformedMap));
 	 int iterCount = 0;
 	 while (swapQueue.size() > 0) {
-		 //printf("SIZE OF SWAP QUEUE: %d\n", swapQueue.size());
 
 		 while (swapQueue.size() > 60000 ) {
 			 //just an optimization to cut down on mappings "we think" are bad, especially useful for large benchmarks
@@ -2402,30 +2022,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 }
 			 swapQueue = tmp;
 		 }
-		  //printf("GOT INSIDE!\n");
 		 //getting the lowest cost path from the queue
 		 PriorityData result = swapQueue.top();
-		 //tuple<int,vector<pair<int, int>>,map<int, int>,map<int, int>>  result = swapQueue.top();
 		 swapQueue.pop();
-		 //vector<pair<int, int>> swapsTaken = get<1>(result);
-		 //map<int, int> initialMapping = get<2>(result);
-		// map<int, int> transformedMapping = get<2>(result);
-		 //int currCost = get<0>(result);
+		 
 		 vector<pair<int, int>> swapsTaken = result.swapsTaken;
-		 //map<int, int> initialMapping = result.initialMapping;
 		 map<int, int> transformedMapping = result.transformedMapping;
 		 
 		 int currCost = result.cost;
-		 //printf("CURRENT TRANSFORMED MAPPING:\n");
-		 //for (auto o = transformedMapping.begin();o != transformedMapping.end();o++) {
-			 //printf("%d mapped to %d, ", o->first, o->second);
-		 //}
-		 if (swapsTaken.size() != 0) {
-			 //printf("LAST CHOSEN SWAP WAS BETWEEN %d and %d with Cost %d\n", swapsTaken[swapsTaken.size() - 1].first, swapsTaken[swapsTaken.size() - 1].second, currCost);
-		 }
-		 //printf("WITH COST: %d", currCost);
-		 //printf("\n");
-		 //debug
+		 
 
 		 //checking equality 
 		 bool equal = true;
@@ -2440,7 +2045,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 if (equal) {
 			 //then we hit the end
 			 //returning the initial mapping, and list of swaps to take
-			 //printf("FOUND MAPPING PATHWAY!\n");
 			 int bestSwaps = swapsTaken.size();
 			 results.push_back(swapsTaken);
 			 // WE WILL RETURN ALL SUCH BEST SWAP PATHWAYS
@@ -2475,19 +2079,10 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 }
 
 
-		 //else we need to think in terms of 1 swap granularities
-		 //we have some cases to think about:
-			//1) suppose a qubit exists in mapping 1 but not in mapping 2
-				//this is no issue because then this qubit does not contribute to the next section of the dependence graph
-			//2) suppose a logical qubit is mapped in mapping 2 but not in mapping 1
-				//then that logical qubit must be involved in an adjacent cnot gate
-				//therefore, we try mapping common qubits first, and as we consider swaps with unmapped neighbors, we assign qubits
-			//3) if a logical qubit is mapped in 1 and 2
-				//then we just consider possible swaps of distance 1 away that are close
+		//considering swaps that take the unagreeing qubits between both maps closer	
 		 for (auto j = transformedMapping.begin();j != transformedMapping.end();j++) {
 			 if (secondMap.find(j->first) == secondMap.end()) {
 				 //then this qubit does not contribute to the next maximal mapping 
-				 //printf("LOGICAL QUBIT %d DOES NOT CONTRIBUTE TO NEXT MAPPING!\n", j->first);
 
 				 continue;
 			 }
@@ -2511,7 +2106,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 //doing the best Swap
 				 vector<pair<int, int>> newSwaps = swapsTaken;
 				 newSwaps.push_back(bestSwap);
-				 //printf("CONSIDERING SWAPPING %d and %d\n", i->first, j->first);
 
 				 //updating transformed mapping
 				 map<int, int> updatedMapping = transformedMapping;
@@ -2553,7 +2147,8 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 //we have 2 special cases -> first map is not set, second map is not set
 		 if (pathway.initialMapping.size() == 0) {
 			//need to find first mappings, update print queue
-			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(architectureEdges, pathway.firstGates);
+				//fast is set to false for optimality
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(architectureEdges, pathway.firstGates, false);
 			 
 			 //considering every maximal mapping we get
 				//should check if we got a maximal mapping that is perfect or not
@@ -2583,11 +2178,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 if (perfectMappingBreak) {
 					 break;
 				 }
-				// map<int, int> newInitialMapping = get<0>(*j);
-				 //we enqueue all these initial pathways with cost 0, because we do not have a swap cost from a single mapping
 				 
-				 //enqueueing
-				 //optimalQueue.push(SecondPriorityData(0, pathway.swapsTaken, newInitialMapping, pathway.targetMapping, newInitialMapping, get<2>(*j), toAdjust));
 			 }
 			 if (perfectMappingBreak) {
 				 break;
@@ -2602,8 +2193,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 map<int, set<int>> croppedArchitecture = getCroppedArchitecture(pathway.initialMapping, architectureEdges);
 			 map<pair<int, int>, int> modifiedDistances = getDistances(croppedArchitecture);
 			 //now we can start updating the swap cost
-			 //printf("ABOUT TO RUN MAXIMAL MAPPER!\n");
-			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(croppedArchitecture, pathway.firstGates);
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> mappings = maximalMapper(croppedArchitecture, pathway.firstGates,false);
 			 for (auto j = mappings.begin();j != mappings.end();j++) {
 				 //building the print queue for this step
 				 queue<GateNode*> satisfied = getSatisfiedGates(pathway.firstGates, get<2>(*j));
@@ -2614,7 +2204,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 //getting cost
 					//cost only involves heuristic right now since we didnt do any swaps yet
 					//cost is zero right now because no stitching involved
-				// int cost = partialMappingStitchingCost(pathway.transformedMapping, newTargetMapping, modifiedDistances, architectureEdges);
 				 //cost is however many swaps it took to get here + heuristic
 				 vector<vector<pair<int,int>>> allSwaps = pathway.swapsTaken;
 				 int numSwaps = 0;
@@ -2628,17 +2217,13 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 }
 			 continue;
 		 }
-		 //printf("GOT HERE!\n");
 		 //then we stitch the transformed mapping and target mapping together
 		 map<int, set<int>> croppedArchitecture = getCroppedArchitecture(pathway.initialMapping, architectureEdges);
 		 map<pair<int, int>, int> newDistances = getDistances(croppedArchitecture);
 			//if the next gates to start from is empty, we are done
 			//we found the optimal swap solution and we can get to printing
 			//NOTE: THERE MAY BE MULTIPLE STITCHINGS BETWEEN EACH MAXIMAL PARTITION THAT LEAD TO DIFFERENT RESULT MAPPINGS, WE HAVE TO FIND THE BEST
-		 //pair<map<int,int>,vector<pair<int, int>>> newSwaps = stitchMappings(make_pair(pathway.transformedMapping, set<int>()), make_pair(pathway.targetMapping, set<int>()), architectureEdges,distances);
-		 //printf("STARTING SWAPS!\n");
 		 vector<vector<pair<int, int>>> newSwapList = getSwapPathways(pathway.transformedMapping, pathway.targetMapping, newDistances, croppedArchitecture);
-		 //printf("SIZE OF SWAP PATHWAYS: %d\n", newSwapList.size());
 		 //adding the new swaps to the vector of layer swaps
 		 bool totalbreak = false;
 		 for (auto k = newSwapList.begin();k != newSwapList.end();k++) {
@@ -2691,6 +2276,395 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
  }
 
+ //idea here is that as we go, we can print so that we do not take up space
+	//this is my fast mapper, so we do not have to keep all the memory required until we get an optimal solution
+ void parallelSchedulingFastCircuitBuilder(map<int,set<int>> originalArchitectureEdges, set<GateNode*> startGates) {
+	 //will eventually need to print this out
+	 int numSwaps = 0;
+	 int numGates = 0;
+	 int numCycles = 0;
+	 map<pair<int, int>, int> distances = getDistances(originalArchitectureEdges);
+		
+	 queue<GateNode*> forSchedule;
+	 set<GateNode*> toSchedule;
+	 set<GateNode*> inProgress;
+	 set<GateNode*> finished;
+	 vector<pair<GateNode*, int>> logicalSchedule;
+	 GateNode* dummy = new GateNode();
+	 for (int i = 0;i < numLogical;i++) {
+		 //-1 means qubit is free to participate in some mapping
+		 logicalSchedule.push_back( make_pair(dummy, -1));
+	 }
+	 //maintaining our initial mapping (every qubit may not be mapped at the start)
+	 map<int, int> initialMapping;
+	 //keeping track of our current state
+	 map<int, int> toTransform;
+	 //keeping track of the target mapping for swaps
+	 map<int, int> targetMapping;
+	 set<GateNode*> currentGates = startGates;
+	 map<int, set<int>> architectureEdges = originalArchitectureEdges;
+
+	 while (currentGates.size() > 0) {
+
+		 if (initialMapping.size() == 0) {
+			 //need to get initial maximal mapping
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> partialMappings = maximalMapper(architectureEdges, currentGates, true);
+			 //picking lowest cost from these
+			 map<int, int> bestMapping;
+			 set<GateNode*> endGates;
+			 int cost = -1;
+			 for (auto i = partialMappings.begin();i != partialMappings.end();i++) {
+				 int mapCost = partialMappingCost(get<0>(*i), get<2>(*i), distances, architectureEdges);
+				 if (cost == -1 || mapCost < cost) {
+					 bestMapping = get<0>(*i);
+					 cost = mapCost;
+					 endGates = get<2>(*i);
+				 }
+			 }
+
+			 //filling the initial mapping
+			 map<int, int> fullInitialMapping = pickBestFilledMapping(bestMapping, architectureEdges, endGates, distances);
+			 initialMapping = fullInitialMapping;
+			 
+			 toTransform = fullInitialMapping;
+			 forSchedule = getSatisfiedGates(currentGates, endGates);
+			 currentGates = endGates;
+			 
+			 //we do scheduling for the initial maximalMapper
+			 while (forSchedule.size() > 0) {
+				 toSchedule.insert(forSchedule.front());
+				 forSchedule.pop();
+			 }
+
+			 //doing scheduling just like in schedule method for optimal
+			 int numToMap = toSchedule.size();
+			 while (finished.size() < numToMap) {
+				 for (auto i = toSchedule.begin();i != toSchedule.end();) {
+
+					 GateNode* toConsider = *i;
+					 if ((*i)->control != -1) {
+						 //2 qubit gate
+						 //if the parents are already in finish set, or neither in 	
+						 if ((toConsider->targetParent == NULL ||
+							 finished.find(toConsider->targetParent) != finished.end() ||
+							 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end())) &&
+							 ((toConsider->controlParent == NULL) || finished.find(toConsider->controlParent) != finished.end() ||
+								 (toSchedule.find(toConsider->controlParent) == toSchedule.end() && inProgress.find(toConsider->controlParent) == inProgress.end()))) {
+							 //then both parents are satisfied, lets try to map these qubits
+							 if (logicalSchedule[toConsider->target].second == -1 && logicalSchedule[toConsider->control].second == -1) {
+								 //then we can schedule this gate for both qubits
+								 logicalSchedule[toConsider->target] = make_pair(toConsider, latencyDouble);
+								 logicalSchedule[toConsider->control] = make_pair(toConsider, latencyDouble);
+								 //removing this gate from schedule list
+								 inProgress.insert(toConsider);
+								 //removing gate from toSchedule
+								 i = toSchedule.erase(i);
+								 //incrementing gate number
+								 numGates++;
+
+								 //debug--> making sure that this is valid
+								 int firstPhys = toTransform[toConsider->control];
+								 int secondPhys = toTransform[toConsider->target];
+								 if (architectureEdges[firstPhys].find(secondPhys) == architectureEdges[firstPhys].end()) {
+
+									 cout << " SOMETHING WENT TERRIBLY WRONG IN SCHEDULING A QUBIT CNOT!\n";
+								 }
+
+							 }
+							 else {
+								 //moving on 
+								 i++;
+							 }
+						 }
+						 else {
+							 //move on
+							 i++;
+						 }
+					 }
+					 else {
+						 //1 qubit gate	
+						 //check first if parent is being used or not
+						 if (toConsider->targetParent == NULL ||
+							 finished.find(toConsider->targetParent) != finished.end() ||
+							 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end())) {
+							 //then the parent is either done or not considered, so we are good with scheduling
+							 //need to check if this qubit is busy or not
+							 if (logicalSchedule[toConsider->target].second == -1) {
+								 //we can schedule
+								 logicalSchedule[toConsider->target] = make_pair(toConsider, latencySingle);
+								 inProgress.insert(toConsider);
+								 //removing gate from toSchedule
+								 i = toSchedule.erase(i);
+
+								 //incrementing the gate number
+								 numGates++;
+							 }
+							 else {
+								 i++;
+							 }
+						 }
+						 else {
+							 //move on
+							 i++;
+						 }
+					 }
+				 }
+				 //simulating a cycle here
+				for (int z = 0; z < numLogical;z++) {
+					if (logicalSchedule[z].second > 0) {
+						//decrementing
+						GateNode* work = logicalSchedule[z].first;
+						int cyclesLeft = logicalSchedule[z].second;
+						cyclesLeft--;
+						 if (cyclesLeft == 0) {
+							 //then this gate is done executing, we should remove it from the inProgress set and from logicalSchedule
+							 inProgress.erase(work);
+							 finished.insert(work);
+							 //if this gate is a swap gate, then we transform the mapping
+							 //need to make both logical and control qubits the dummy
+							 logicalSchedule[work->target] = make_pair(dummy, -1);
+							 if (work->control != -1) {
+								 logicalSchedule[work->control] = make_pair(dummy, -1);
+							 }
+							 if (work->name == "swp") {
+								 numSwaps++;
+								 //we do the swap change
+								 //debug --> checking if swap is valid or not
+								 int physOne = toTransform[work->control];
+								 int physTwo = toTransform[work->target];
+								 
+								 if (architectureEdges[physOne].find(physTwo) == architectureEdges[physOne].end()) {
+									cout << "SOMETHING WENT TERRIBLY WRONG WITH MAPPING FOR SWAP!\n";
+								 }
+
+
+								 //doing the swap
+								 int tmp = toTransform[work->control];
+								 toTransform[work->control] = toTransform[work->target];
+								 toTransform[work->target] = tmp;
+							 }
+
+							 //printing the gate
+							 if (work->control == -1) {
+								 cout << work->name << " q[" << toTransform[work->target] << "] ; // formerly on logical qubit q[" << work->target << "]\n";
+							 }
+							 else {
+								 cout << work->name << " q[" << toTransform[work->control] << "], q[" << toTransform[work->target] << "] ; // between logical q[" << work->control << "], q[" << work->target << "]\n";
+							 }
+						 }
+						
+					}
+				}
+				//this simulates a single cycle
+				numCycles++;
+
+			 }
+
+			 //we are good here, now we empty the sets
+			 toSchedule.clear();
+			 inProgress.clear();
+			 finished.clear();
+
+
+			 continue;
+		 }
+
+		 if (targetMapping.size() == 0) {
+			 //generating closest mapping to the last mapping
+			 //first cropping the architecture to our initial mapping and then updating distances
+			 architectureEdges = getCroppedArchitecture(initialMapping, architectureEdges);
+
+			 distances = getDistances(architectureEdges);
+			 
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>>> res = maximalMapper(architectureEdges, currentGates, true);
+			 //picking the "closest" mapping to our last mapping (transformed Mapping)
+			 int cost = -1;
+			 map<int, int> closest;
+			 set<GateNode*> endGates;
+			 for (auto k = res.begin();k != res.end();k++) {
+				 int stitchingCost = partialMappingStitchingCost(toTransform, get<0>(*k), distances, architectureEdges);
+				 if (cost == -1 || stitchingCost < cost) {
+					 cost = stitchingCost;
+					 closest = get<0>(*k);
+					 endGates = get<2>(*k);
+				}
+			 }
+			
+
+			 //getting swaps needed to stitch
+			 pair<map<int,int>,vector<pair<int,int>>> swaps = stitchMappings(make_pair(toTransform, set<int>()), make_pair(closest, set<int>()), architectureEdges, distances);
+			 
+			 //parallelizing swaps 
+			 vector<set<pair<int, int>>> parallelizedSwaps = parallelizeSwapPathway(swaps.second);
+			 //tacking on swaps to end of partition basically, and we will print and apply the swaps 1 by 1
+			 numCycles += parallelizedSwaps.size() * latencySwap;
+			 for (auto i = parallelizedSwaps.begin();i != parallelizedSwaps.end();i++) {
+				 for (auto j = (*i).begin();j != (*i).end();j++) {
+					 //printing the swap, then applying it 
+					 numSwaps++;
+					 cout << "swp q[" << toTransform[j->first] << "], q[" << toTransform[j->second] << "] ; // between logical q[" << j->first << "], q[" << j->second << "]\n";
+					 //performing the swap
+					 int tmp = toTransform[j->first];
+					 toTransform[j->first] = toTransform[j->second];
+					 toTransform[j->second] = tmp;
+				 }
+			 }
+
+			 //we are done applying swaps
+			 //now we get the next queue to print
+			 //scheduling these gates
+			 queue<GateNode*> satisfiedGates = getSatisfiedGates(currentGates, endGates);
+			 currentGates = endGates;
+			 while (satisfiedGates.size() > 0) {
+				//do the same thing as above
+				 toSchedule.insert(satisfiedGates.front());
+				 satisfiedGates.pop();
+			 }
+
+			 int numToMap = toSchedule.size();
+			 while (finished.size() < numToMap) {
+				 for (auto i = toSchedule.begin();i != toSchedule.end();) {
+
+					 GateNode* toConsider = *i;
+					 if ((*i)->control != -1) {
+						 //2 qubit gate
+						 //if the parents are already in finish set, or neither in 	
+						 if ((toConsider->targetParent == NULL ||
+							 finished.find(toConsider->targetParent) != finished.end() ||
+							 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end())) &&
+							 ((toConsider->controlParent == NULL) || finished.find(toConsider->controlParent) != finished.end() ||
+								 (toSchedule.find(toConsider->controlParent) == toSchedule.end() && inProgress.find(toConsider->controlParent) == inProgress.end()))) {
+							 //then both parents are satisfied, lets try to map these qubits
+							 if (logicalSchedule[toConsider->target].second == -1 && logicalSchedule[toConsider->control].second == -1) {
+								 //then we can schedule this gate for both qubits
+								 logicalSchedule[toConsider->target] = make_pair(toConsider, latencyDouble);
+								 logicalSchedule[toConsider->control] = make_pair(toConsider, latencyDouble);
+								 //removing this gate from schedule list
+								 inProgress.insert(toConsider);
+								 //removing gate from toSchedule
+								 i = toSchedule.erase(i);
+								 //incrementing gate number
+								 numGates++;
+
+								 //debug--> making sure that this is valid
+								 int firstPhys = toTransform[toConsider->control];
+								 int secondPhys = toTransform[toConsider->target];
+								 if (architectureEdges[firstPhys].find(secondPhys) == architectureEdges[firstPhys].end()) {
+
+									 cout << " SOMETHING WENT TERRIBLY WRONG IN SCHEDULING A QUBIT CNOT!\n";
+								 }
+
+							 }
+							 else {
+								 //moving on 
+								 i++;
+							 }
+						 }
+						 else {
+							 //move on 
+							 i++;
+						 }
+					 }
+					 else {
+						 //1 qubit gate	
+						 //check first if parent is being used or not
+						 if (toConsider->targetParent == NULL ||
+							 finished.find(toConsider->targetParent) != finished.end() ||
+							 (toSchedule.find(toConsider->targetParent) == toSchedule.end() && inProgress.find(toConsider->targetParent) == inProgress.end())) {
+							 //then the parent is either done or not considered, so we are good with scheduling
+							 //need to check if this qubit is busy or not
+							 if (logicalSchedule[toConsider->target].second == -1) {
+								 //we can schedule
+								 logicalSchedule[toConsider->target] = make_pair(toConsider, latencySingle);
+								 inProgress.insert(toConsider);
+								 //removing gate from toSchedule
+								 i = toSchedule.erase(i);
+
+								 //incrementing the gate number
+								 numGates++;
+							 }
+							 else {
+								 i++;
+							 }
+						 }
+						 else {
+							 //move on
+							 i++;
+						 }
+					 }
+				 }
+				 //simulating a cycle here
+				for (int z = 0; z < numLogical;z++) {
+					if (logicalSchedule[z].second > 0) {
+						//decrementing
+						GateNode* work = logicalSchedule[z].first;
+						int cyclesLeft = logicalSchedule[z].second;
+						cyclesLeft--;
+						 if (cyclesLeft == 0) {
+							 //then this gate is done executing, we should remove it from the inProgress set and from logicalSchedule
+							 inProgress.erase(work);
+							 finished.insert(work);
+							 //if this gate is a swap gate, then we transform the mapping
+							 //need to make both logical and control qubits the dummy
+							 logicalSchedule[work->target] = make_pair(dummy, -1);
+							 if (work->control != -1) {
+								 logicalSchedule[work->control] = make_pair(dummy, -1);
+							 }
+							 if (work->name == "swp") {
+								 numSwaps++;
+								 //we do the swap change
+								 //debug --> checking if swap is valid or not
+								 int physOne = toTransform[work->control];
+								 int physTwo = toTransform[work->target];
+								 
+								 if (architectureEdges[physOne].find(physTwo) == architectureEdges[physOne].end()) {
+									cout << "SOMETHING WENT TERRIBLY WRONG WITH MAPPING FOR SWAP!\n";
+								 }
+
+
+								 //doing the swap
+								 int tmp = toTransform[work->control];
+								 toTransform[work->control] = toTransform[work->target];
+								 toTransform[work->target] = tmp;
+							 }
+
+							 //printing the gate
+							 if (work->control == -1) {
+								 cout << work->name << " q[" << toTransform[work->target] << "] ; // formerly on logical qubit q[" << work->target << "]\n";
+							 }
+							 else {
+								 cout << work->name << " q[" << toTransform[work->control] << "], q[" << toTransform[work->target] << "] ; // between logical q[" << work->control << "], q[" << work->target << "]\n";
+							 }
+						 }
+						
+					}
+				}
+				//this simulates a single cycle
+				numCycles++;
+
+			 }
+
+
+			 //setting second mapping back to nothing (since now transformed mapping handles it)
+			 targetMapping = map<int, int>();
+			 //clearing the sets
+			 toSchedule.clear();
+			 inProgress.clear();
+			 finished.clear();
+		 }
+	 }
+	 cout << " NUMBER GATES: " << numGates <<"\n";
+	 cout << " NUMBER SWAPS: " << numSwaps << "\n";
+	 cout << " NUMBER CYCLES: " << numCycles << "\n";
+
+	 //printing out initial mapping
+	 cout << "INITIAL MAPPING!\n";
+	 for (auto i = initialMapping.begin();i != initialMapping.end();i++) {
+		 cout << "Logical q[" << i->first << "] mapped to physical Q[" << i->second<<"] \n";
+	 }
+	
+ }
+
  //my faster version of the optimal solver
  void betterLazySwapCircuitBuilder(map<int,set<int>> originalArchitectureEdges, set<GateNode*> startGates) {
  //since our initial mapping varies until everything is mapped, we have to print out gates at the end
@@ -2698,7 +2672,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 //gates satisfied for every step of the maximal mapping
 	 //distance matrix to be updated at each step
 	 map<pair<int, int>, int> distances = getDistances(originalArchitectureEdges);
-	// vector<vector<int>> distanceMatrix = getPhysicalDistancesFloydWarshall(originalArchitectureEdges);
 	 vector<queue<GateNode*>> maximalMappingSatisfiedGates;
 	 //swaps that need to be taken after every maximal partition, if any
 	 vector<vector<pair<int, int>>> levelSwaps;
@@ -2710,10 +2683,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 map<int, set<int>> architectureEdges = originalArchitectureEdges;
 	 while (currentGates.size() > 0) {
 		 //doing maximal mapping first
-		 printf("STARTING MAXIMAL MAPPING!\n");
-		 vector<tuple<map<int,int>,set<int>,set<GateNode*>>> partialMapping=maximalMapper(architectureEdges, currentGates);
-
-		
+		 vector<tuple<map<int,int>,set<int>,set<GateNode*>>> partialMapping=maximalMapper(architectureEdges, currentGates,true);
 
 		 
 		 //if this is first maximal mapping we will need to find the best one for remaining cost and set that as our initial mapping
@@ -2732,7 +2702,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				
 			 //getting the best filled mapping
 			 map<int, int> filledMapping = pickBestFilledMapping(lastMapping.first, architectureEdges, endGates,distances);
-			 //printf("GOT OUR BEST FILLED MAPPING!\n");
 
 			 //updating the last mapping
 			 set<int> toContinue = lastMapping.second;
@@ -2743,27 +2712,21 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 //updating architecture edges
 			 architectureEdges = getCroppedArchitecture(filledMapping, architectureEdges);
-			 //printf("GOT OUR CROPPED ARCHITECTURE!\n");
 
 			 //updating distance matrix for our new architecture
-			 //distanceMatrix = getPhysicalDistancesFloydWarshall(architectureEdges);
 			 distances = getDistances(architectureEdges);
-			 //printf("UPDATED DISTANCE MATRIX!\n");
 
 			 //adding gates to the print queue
 			 queue<GateNode*> toPrint = getSatisfiedGates(currentGates, endGates);
-			 printf("TO PRINT/ SATISFIED GATES FUNCTION RETURNED %d\n", toPrint.size());
 
 			 //updating currentGates
 			 currentGates = endGates;
 
 			//pushing print queue to vector
 			maximalMappingSatisfiedGates.push_back(toPrint);
-			//printf("FINISHED FIRST ITERATION!\n");
 			continue;
 		 }
 		 else {
-			 //printf("STARTED OTHER ITERATION!\n");
 			//need to find the closest mapping to the previous mapping, and then consider swaps
 			 pair<map<int, int>, set<int>> bestMapping;
 			 int bestMappingCost = -1;
@@ -2777,10 +2740,8 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 endGates = get<2>(*z);
 				}
 			 }
-			 //printf("STARTED SWAPS!\n");
 			 //now we find the list of swaps to take
 			 pair<map<int, int>, vector<pair<int, int>>> swaps = stitchMappings(lastMapping, bestMapping, architectureEdges,distances);
-			 //printf("FINISHED SWAPS\n");
 
 			 //push back list of swaps to vector
 			 levelSwaps.push_back(swaps.second);
@@ -2807,16 +2768,13 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 //adding gates to the print queue
 			 queue<GateNode*> toPrint = getSatisfiedGates(currentGates, endGates);
-			 printf("TO PRINT/ SATISFIED GATES FUNCTION RETURNED %d\n", toPrint.size());
 
 			 //updating currentGates
 			 currentGates = endGates;
 
 			//pushing print queue to vector
 			maximalMappingSatisfiedGates.push_back(toPrint);
-			//printf("FINISHED NEXT ITERATION\n");
 		 }
-
 
 
 	 }
@@ -2824,72 +2782,6 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 //we call schedule here
 	
 	 scheduleCircuit(maximalMappingSatisfiedGates,levelSwaps,initialMapping,1,1,1,architectureEdges);
-	 //printf("REACHED HERE!\n");
-
-	 //if there are unmapped qubits in the initial mapping, then they do not matter and we can assign them whatever we want here
-		//specifically, we can assign them any unmapped physical qubit
-	 /*
-	 while (initialMapping.size() != numLogical) {
-		 for (int i = 0;i < numLogical;i++) {
-			 if (initialMapping.find(i) == initialMapping.end()) {
-				 //then we can assign them any unmapped physical qubit
-				 for (auto j = architectureEdges.begin();j != architectureEdges.end();j++) {
-					 bool mapped = false;
-					 for (auto z = initialMapping.begin();z != initialMapping.end();z++) {
-						 if (z->second == j->first) {
-							 mapped = true;
-							 break;
-						}
-					 }
-					 if (!mapped) {
-						 //then we can map it
-						 initialMapping[i] = j->first;
-					 }
-				 }
-				 break;
-			 }
-		 }
-	 }
-	 */
-	 /*
-	 //keeping a copy to print at the very end
-	 map<int, int> copyInitialMapping = initialMapping;
-	 //proceeding with printing/writing the circuit
-		//we just start with the initial mapping --> print the first set of gates ---> apply swaps ---> print next set of gates, and so on
-	 for (int i = 0;i != maximalMappingSatisfiedGates.size();i++) {
-		 if (i != 0) {
-			 //need to apply swaps first before printing
-			 //we parallelize swaps and then print
-			 //we have exactly one less swap entry than levels (start level does not need swaps)
-			 vector<pair<int, int>> swaps = levelSwaps[i - 1];
-			 vector<set<pair<int, int>>> parallel = parallelizeSwapPathway(swaps);
-			 for (auto p = parallel.begin();p != parallel.end();p++) {
-				 for (auto z = (*p).begin();z != (*p).end();z++) {
-					 //adding a swap to initial mapping and also printing the swap
-					 cout << "swp q[" << initialMapping[z->first] << "], q[" << initialMapping[z->second] << "]; // swap logical qubits q" << z->first << ", and q" << z->second << "\n";
-					 //applying the swap
-					 int tmp = initialMapping[z->first];
-					 initialMapping[z->first] = initialMapping[z->second];
-					 initialMapping[z->second] = tmp;
-				 }
-			 }
-		 }
-		 queue<GateNode*> satisfied = maximalMappingSatisfiedGates[i];
-		 while (satisfied.size() > 0) {
-			 GateNode* toPrint = satisfied.front();
-			 satisfied.pop();
-			 
-			 //printing name and qubits involved
-			 if (toPrint->control == -1) {
-				 //printing single qubit gate
-				 cout << toPrint->name << " q[" << initialMapping[toPrint->target] << "]; // formerly on qubit q[" << toPrint->target << "]\n";
-			 }
-			 else {
-				 //printing 2 qubit gate
-				 cout << toPrint->name << " q[" << initialMapping[toPrint->control] << "], q[" << initialMapping[toPrint->target] << "]; // formerly on qubits q[" << toPrint->control << "], q[" << toPrint->target << "]\n";
-			 }
-		 }
-	 }*/
 
 	 //printing the initial mapping
 	 cout << "INITIAL MAPPING!: \n";
@@ -2909,9 +2801,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 queue<map<int, int>> resultQueue;
 	 int count = 1;
 	 do {
-		 ////printf("ON ITERATION %d\n", count);
-		vector <tuple<map<int, int>, set<int>, set<GateNode*>> > result = maximalMapper(architectureEdges,nextGates);
-		////printf("FINISHED MAPPING THIS SEGMENT WITH NUM MAPPINGS %u!\n",result.size());
+		vector <tuple<map<int, int>, set<int>, set<GateNode*>> > result = maximalMapper(architectureEdges,nextGates,false);
 		map<int, int> mapping = get<0>(result[0]);
 		nextGates = get<2>(result[0]);
 		resultQueue.push(mapping);
