@@ -48,6 +48,7 @@ map<int, int> pickBestFilledMapping(map<int, int> mapping, map<int, set<int>> ar
 map<pair<int, int>, int> getDistances(map<int, set<int>> architectureEdges);
 int getNaiveDistance(map<int, set<int>> architectureEdges, int Q1, int Q2);
 vector<vector<pair<int, int>>> getSwapPathways(map<int, int> one, map<int, int> two, map<pair<int, int>, int> distances, map<int, set<int>> architectureEdges);
+set<GateNode*> getNextLevel(set<GateNode*> previousLevel);
 
 
 //global distance matrix
@@ -517,7 +518,6 @@ map<int, int> perfectMapper(map<int, set<int>> architectureEdges, set<GateNode*>
 		//the second element is jsut a set of mapped architecture nodes --> for quick lookup
 		//the third element is the queue of gatenodes which could not be matched and should be considered the "start" for the next iteration
 		//this is returned so we can easily start the next iteration of mapping
-	//if fast is true, the algorithm will try and rule out partial mappings at every step of the propogation process
 		//this may result in a maximal mapping that is not actually maximal, but it is faster for larger circuits
 vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int, set<int>> architectureEdges, set<GateNode*> startSet) {
 	//we first grab a copy of the coupling graph and associated nodeDegree vector
@@ -538,6 +538,8 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 	set<GateNode*> closedSet;
 	//this is a queue to insert accounted gates into, will come into play when we actually start mapping
 	deque<GateNode*> mappingQueue;
+	//keeping track of gates whose requirements have been satisfied
+	set<GateNode*> mappingSet;
 	//vector<GateNode*> mappingQueue;
 	//set<GateNode*> mappingSet;
 	set<GateNode*> couldntMap;
@@ -550,7 +552,18 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 	while (start.size() > 0) {
 		////printf("current size: %d\n",start.size());
 		for (auto i = start.begin();i!=start.end();) {
+
+			if (start.find((*i)->controlParent) != start.end() || start.find((*i)->targetParent) != start.end()) {
+				//we only keep the parent
+				i=start.erase(i);
+			}
+			else {
+				//no parent found in the set, so we push to startGates
+				startGates.push((*i));
+				i=start.erase(i);
+			}
 			
+			/*
 			if (start.find((*i)->controlParent) == start.end() && start.find((*i)->targetParent) == start.end()) {
 				//then we add it into queue to get a level order
 				startGates.push((*i));
@@ -559,6 +572,7 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			} else{
 				i++;
 			}
+			*/
 		}
 		////printf("exited loop!\n");
 	}
@@ -572,13 +586,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 
 		GateNode* chosen = startGates.front();
 		startGates.pop();
-		////printf("Chosen gate: %d control and %d target\n",chosen->control,chosen->target);
-		if (chosen->controlChild!=NULL && chosen->controlChild->control==8 && chosen->controlChild->target==12){
-			////printf("THIS GATE IS THE CULPRIT!\n");
+
+		if (closedSet.find(chosen) != closedSet.end() || couldntMap.find(chosen) != couldntMap.end()) {
+			//no point continuing with this, as we have tried it before
+			continue;
 		}
-		if (chosen->targetChild!=NULL && chosen->targetChild->control==8 && chosen->targetChild->target==12){
-			////printf("THIS GATE IS THE CULPRIT!\n");
-		}
+		
 		if (closedSet.find(chosen) != closedSet.end()) {
 			//then we already saw this
 			continue;
@@ -596,11 +609,11 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			if (chosen->targetChild!=NULL){
 				GateNode* child = chosen->targetChild;
 				if (child->control == chosen->target){
-					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || ( startSet.find(child->targetParent)==startSet.end())){
+					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
 						startGates.push(child);
 					}
 				} else{
-					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || (startSet.find(child->controlParent)==startSet.end())){
+					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() ){
 						startGates.push(child);
 					}
 				}
@@ -623,12 +636,12 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 					GateNode* child = chosen->controlChild;
 					if (child->control == chosen->control){
 						//then we need to check target parent
-						if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
+						if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
 							startGates.push(child);
 						}
 					} else {
 						//then we need to check control parent
-						if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
+						if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
 							startGates.push(child);
 						}
 					}
@@ -639,13 +652,13 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 					
 					if (child->control == chosen->target){
 						//then we need to check target parent
-						if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
+						if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
 							startGates.push(child);
 						}
 					} else {
 						
 						//then we need to check control parent
-						if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
+						if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
 							startGates.push(child);
 						}
 					}
@@ -717,23 +730,24 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 			//we couldnt map the given gate, so we will push it to a list of nodes 
 			couldntMap.insert(chosen);
 			//we do not want to consider this gate again
-			closedSet.insert(chosen);
+			//closedSet.insert(chosen);
 		}
 		else {
 			//then we can update (add children of the block to the queue
 			//adding the chosen gate to the mapping queue
 			mappingQueue.push_back(chosen);
+			//mappingQueue mirrors the closedSet set
 			closedSet.insert(chosen);
 			if (chosen->controlChild!=NULL){
 				GateNode* child = chosen->controlChild;
 				if (child->control == chosen->control){
 					//then we need to check target parent
-					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
+					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() ){
 						startGates.push(child);
 					}
 				} else {
 					//then we need to check control parent
-					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
+					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
 						startGates.push(child);
 					}
 				}
@@ -744,13 +758,13 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 				
 				if (child->control == chosen->target){
 					//then we need to check target parent
-					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end() || startSet.find(child->targetParent)==startSet.end()){
+					if (child->targetParent == NULL || closedSet.find(child->targetParent)!=closedSet.end()){
 						startGates.push(child);
 					}
 				} else {
 					
 					//then we need to check control parent
-					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end() || startSet.find(child->controlParent)==startSet.end()){
+					if (child->controlParent == NULL || closedSet.find(child->controlParent)!=closedSet.end()){
 						startGates.push(child);
 					}
 				}
@@ -779,9 +793,9 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		mappingQueue.pop_front();
 		mappingQueue.push_back(forMapping);
 		if ((forMapping->controlParent !=NULL && debugSet.find(forMapping->controlParent)==debugSet.end()) || (forMapping->targetParent!=NULL && debugSet.find(forMapping->targetParent)==debugSet.end())){
-			////printf("ORDER NOT SATISFIED! for control %d and target %d\n",forMapping->control,forMapping->target);
+			//printf("ORDER NOT SATISFIED! for control %d and target %d\n",forMapping->control,forMapping->target);
 			if ((forMapping->controlParent !=NULL && forMapping->controlParent->control==-1) ||(forMapping->targetParent!=NULL && forMapping->targetParent->control==-1) ){
-				////printf("AS I SUSPECTED!\n");
+				//printf("AS I SUSPECTED!\n");
 			}
 		}
 		debugSet.insert(forMapping);
@@ -1090,24 +1104,64 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		}
 		*/
 		//i just put the couldntMap gates and children of completedGates into the nextGates set
+		//debug
+		/*
+		for (auto j = completedGates.begin();j != completedGates.end();j++) {
+			cout << "Gate with name " << (*j)->name << " on log qubits " << (*j)->control << ", " << (*j)->target << " completed \n";
+		}
+
+		for (auto j = completedGates.begin();j != completedGates.end();j++) {
+			if ((*j)->controlChild != NULL && completedGates.find((*j)->controlChild) == completedGates.end()) {
+				//we add this to the final set
+				finalSet.insert((*j)->controlChild);
+			}
+
+			if ((*j)->targetChild != NULL && completedGates.find((*j)->targetChild) == completedGates.end()) {
+				finalSet.insert((*j)->targetChild);
+			}
+		}
+		*/
+
+		//going level by level and seeing what is left to map
+		set<GateNode*> toSkim = startSet;
+		while (toSkim.size() > 0) {
+			for (auto i = toSkim.begin();i != toSkim.end();) {
+				if (completedGates.find(*i) == completedGates.end()) {
+					finalSet.insert(*i);
+					i = toSkim.erase(i);
+				}
+				else {
+					i++;
+				}
+			}
+			toSkim = getNextLevel(toSkim);
+		}
+		/*
 		for (auto j = completedGates.begin();j != completedGates.end();j++) {
 			if ((*j)->controlChild != NULL) {
 				//checking if child is not in completed gates or couldnt map set
+					//NEED TO MAKE SURE THAT BOTH PARENTS ARE COMPLETED BEFORE INSERTING
 				if (completedGates.find((*j)->controlChild) == completedGates.end() && couldntMap.find((*j)->controlChild) == couldntMap.end()) {
-					finalSet.insert((*j)->controlChild);
+					if ((*j)->controlChild->targetParent == NULL || completedGates.find((*j)->controlChild->targetParent) != completedGates.end()) {
+						cout << "INSERTED TO FINAL SET:" << (*j)->name << " q" << (*j)->control << ", q" << (*j)->target << "\n";
+						finalSet.insert((*j)->controlChild);
+					}
 				}
 			}
 
 			if ((*j)->targetChild != NULL && (*j)->targetChild!=(*j)->controlChild) {
 				if (completedGates.find((*j)->targetChild) == completedGates.end() && couldntMap.find((*j)->targetChild) == couldntMap.end()) {
+					if((*j)->targetChild->controlParent==NULL || completedGates.find((*j)->targetChild->controlParent)!=completedGates.end())
+					cout << "INSERTED TO FINAL SET:" << (*j)->name << " q" << (*j)->control << ", q" << (*j)->target<<"\n";
 					finalSet.insert((*j)->targetChild);
 				}
 			}
-		}
-
+		}*/
+		/*
 		for (auto j = couldntMap.begin();j != couldntMap.end();j++) {
 			finalSet.insert(*j);
 		}
+		*/
 		results.push_back(make_tuple(get<0>(queueEntry), get<1>(queueEntry), finalSet));
 
 	}
@@ -1116,9 +1170,13 @@ vector <tuple<map<int, int>, set<int>, set<GateNode*>> > maximalMapper( map<int,
 		//in addition, we need to do some setup for the future initial gates to consider (because we will run this method multiple times)
 	//returning the best partial mappings, and the gates for the next iteration are already modified in firstGates
 	//printf("RETURNING RESULTS!\n");
-	//cout << "Gates mapped: " << numGatesMapped << "\n";
-	//cout << "COULDNT MAP SIZE! : " << couldntMap.size() << " \n";
-	//cout << "Gates Considered Size: " << otherClosedSet.size() << "\n";
+	cout << "Gates mapped: " << numGatesMapped << "\n";
+	cout << "COULDNT MAP SIZE! : " << couldntMap.size() << " \n";
+//	cout << "Gates Considered Size: " << otherClosedSet.size() << "\n";
+	printf("CHECKING FINAL SET!\n");
+	for (auto i = get<2>(results[0]).begin();i != get<2>(results[0]).end();i++) {
+		cout << "FINAL SET CONTAINS " << (*i)->name << " on qubits " << (*i)->control << ", " << (*i)->target << "\n";
+	}
 	return results;
 	
 }
@@ -1627,11 +1685,11 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 
 	 //enqueueing the base state
-	 printf("ENQUEING BASE STATE!\n");
+	 //printf("ENQUEING BASE STATE!\n");
 	 swapQueue.push(PriorityData(partialMappingStitchingCost(firstMap, secondMap, distances, architectureEdges), vector<pair<int, int>>(), transformedMap));
 	 int iterCount = 0;
 	 while (swapQueue.size() > 0) {
-		 printf("SIZE OF SWAP QUEUE: %d\n", swapQueue.size());
+		 //printf("SIZE OF SWAP QUEUE: %d\n", swapQueue.size());
 
 		 while (swapQueue.size() > 60000 ) {
 			 //just an optimization to cut down on mappings "we think" are bad, especially useful for large benchmarks
@@ -2016,8 +2074,14 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  void scheduleCircuit(vector<queue<GateNode*>> gateMappings,vector<vector<pair<int,int>>> levelSwaps,map<int,int> initialMapping, int latencySingle, int latencyDouble, int latencySwap,map<int,set<int>> architectureEdges) {
 	//idea, we just schedule level by level, and whatever is not finished after every cycle, we push to the next	
 		//this is the trivial scheduling for the non-interleaved case;
+	 int totalGates = 0;
+	 for (auto i = gateMappings.begin();i != gateMappings.end();i++) {
+		 totalGates += (*i).size();
+	 }
+	 printf("CONFIRMING TOTAL GATES IN CIRCUIT: %d \n",totalGates);
 	 int numCycles = 0;
 	 int numGates = 0;
+	 int numSwaps = 0;
 	 GateNode* dummy = new GateNode();
 	 map<int, int> toTransform = initialMapping;
 	 vector<pair<GateNode*, int>> logicalSchedule; 
@@ -2053,12 +2117,12 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 }
 
 		 //debug
-		 /*
+		 
 		 printf("PRINTING ALL GATES TO SCHEDULE!\n");
 		 for (auto j = toSchedule.begin();j != toSchedule.end();j++) {
 			 cout << (*j)->name << " between control: " << (*j)->control << " and target: " << (*j)->target << " \n";
 		 }
-		 */
+		 
 				 
 		 //starting the scheduling
 		 int numTotalGates = toSchedule.size();
@@ -2230,6 +2294,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 							 logicalSchedule[work->control] = make_pair(dummy, -1);
 						 }
 						 if (work->name == "swp") {
+							 numSwaps++;
 							 //we do the swap change
 							 //debug --> checking if swap is valid or not
 							 int physOne = toTransform[work->control];
@@ -2306,6 +2371,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 }
 	 cout << "NUMBER OF CYCLES: " << numCycles<<"\n";
 	 cout << "NUMBER OF GATES: " << numGates << "\n";
+	 cout << "NUMBER OF SWAPS: " << numSwaps << "\n";
 
 	 	
 	 
@@ -2686,6 +2752,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 //adding gates to the print queue
 			 queue<GateNode*> toPrint = getSatisfiedGates(currentGates, endGates);
+			 printf("TO PRINT/ SATISFIED GATES FUNCTION RETURNED %d\n", toPrint.size());
 
 			 //updating currentGates
 			 currentGates = endGates;
@@ -2740,6 +2807,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 
 			 //adding gates to the print queue
 			 queue<GateNode*> toPrint = getSatisfiedGates(currentGates, endGates);
+			 printf("TO PRINT/ SATISFIED GATES FUNCTION RETURNED %d\n", toPrint.size());
 
 			 //updating currentGates
 			 currentGates = endGates;
