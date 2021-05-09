@@ -2307,123 +2307,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 cout << "NUMBER OF CYCLES: " << numCycles<<"\n";
 	 cout << "NUMBER OF GATES: " << numGates << "\n";
 
-	 /*
-		 //basic implementation for now
-		 //just tacking on swaps to the end of a portion of the mapping
-
-		 //idea for representing scheduling, we have a vector of size numLogical of type pair<GateNode*,int> 
-		 //the gateNode is the gate that is being run , and the second part of the int is the time remaining
-
-		 //we already have a level order for each of the gates and a set of swaps after each set of gates, so no problem here
-			//if a logical qubit is not doing any work, its space will have (NULL,-1)
-
-		 //idea, greedy scheduling
-				//just schedule what we can, if there is a gap and 2 qubits are not being used in the rest, we can start the swap
-				//basically, use slack space here
-		 map<int, int> toTransform = initialMapping;
-		 vector<pair<GateNode*, int>> logicalSchedule;
-		 for (int i = 0;i < numLogical;i++) {
-			 logicalSchedule.push_back(make_pair(NULL, -1));
-		 }
-		 int iterations = 0;
-		 for (auto z = gateMappings.begin();z != gateMappings.end();z++) {
-			 if (iterations != 0) {
-				//need to put in swaps here
-				 vector<pair<int, int>> swaps = levelSwaps[i - 1];
-				 vector<set<pair<int, int>>> parallelizedSwaps = parallelizeSwapPathway(swaps);
-
-				 //size of this vector is the number of cycles we will need
-				 numCycles += parallelizedSwaps.size();
-
-				 //transforming the mapping and printing the swap gate
-				 for (auto i = parallelizedSwaps.begin();i != parallelizedSwaps.end();i++) {
-					 for (auto j = (*i).begin();j != (*i).end();j++) {
-						 pair<int, int> swap = *j;
-						 cout << "swp q[" << toTransform[swap.first] << "], q[" << toTransform[swap.second] << "]; // between logical q[" << swap.first << "], q[" << swap.second << "]\n";
-						 numGates++;
-						 //transforming the mapping
-						 int tmp = toTransform[swap.first];
-						 toTransform[swap.first] = toTransform[swap.second];
-						 toTransform[swap.second] = tmp;
-					}
-				 }
-			 }
-			 queue<GateNode*> mappings = *z;
-			 while (mappings.size() > 0) {
-				 //fit whatever we can to the logical qubits
-				 //once we hit a gate that cannot be mapped to a logical qubit, thats the end of the level mapping
-				 GateNode* toSchedule = mappings.front();
-				 //see if this can be assigned to the qubit or not
-				 int control = toSchedule->control;
-				 int target = toSchedule->target;
-				 bool couldntSchedule = false;
-				 if (control == -1) {
-					 //single qubit gate
-					 if (logicalSchedule[target].first == NULL) {
-						 //placing this in the schedule
-						 //1 Latency for now in code, will change
-						 pair<GateNode*, int> toInsert = make_pair(toSchedule, 1);
-						 //removing the gate from mappings because it is scheduled
-						 mappings.pop();
-					 }
-					 else {
-						 couldntSchedule = true;
-					 }
-				 }
-				 else {
-					 //2 qubit gate
-					 if (logicalSchedule[target].first == NULL && logicalSchedule[control].first == NULL) {
-						 //placing this in the schedule
-						 //1 latency in code for now, will change
-						 pair<GateNode*, int> toInsert = make_pair(toSchedule, 1);
-						 //removing the gate from mappings because it is scheduled
-						 mappings.pop();
-					 }
-					 else {
-						 couldntSchedule = true;
-					 }
-
-				 }
-
-				 if (couldntSchedule) {
-					 //done scheduling for now, we simulate a cycle
-					 for (auto j = logicalSchedule.begin();j != logicalSchedule.end();j++) {
-						 if (j->second > 0) {
-							 //decrement
-							 int newCyclesLeft = j->second - 1;
-							 if (newCyclesLeft == 0) {
-								 //then the gate is done, we can print it
-								 GateNode* toPrint = j->first;
-								 int control = toPrint->control;
-								 int target = toPrint->target;
-								 if (control == -1) {
-									 //printing single qubit gate
-									 cout << toPrint->name << " q[" << toTransform[target] << "]; // formerly on qubit q[" << target << "]";
-									 numGates++;
-									 //removing gate from schedule list
-									 (*j) = make_pair(NULL, -1);
-								 }
-								 else {
-									 //printing two qubit gate
-									 cout << toPrint->name << "q[" << toTransform[control] << "], q[" << toTransform[target] << "]; // formerly between q[" << control << "], q[" << target << "] \n";
-									 numGates++;
-									 //removing gate from schedule list
-									 logicalSchedule[control] = make_pair(NULL, -1);
-									 logicalSchedule[target] = make_pair(NULL, -1);
-								 }
-							 }
-						}
-					 }
-					 //we did one cycle
-					 numCycles++;
-				 }
-
-			 }
-
-			 iterations++;
-		 }
-
-	*/	
+	 	
 	 
  }
 
@@ -2627,6 +2511,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 						 printQueue = toAdjust;
 						 break;
 					 }
+					 //start with cost 0 so that all these get propogated and account for swaps
 					 optimalQueue.push(SecondPriorityData(0, pathway.swapsTaken, newInitialMapping, pathway.targetMapping, newInitialMapping, get<2>(*j), toAdjust));
 				 }
 				 if (perfectMappingBreak) {
@@ -2662,7 +2547,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 				 toAdjust.push_back(satisfied);
 				 //getting cost
 					//cost only involves heuristic right now since we didnt do any swaps yet
-				 int cost = partialMappingStitchingCost(pathway.transformedMapping, newTargetMapping, modifiedDistances, architectureEdges);
+					//cost is zero right now because no stitching involved
+				// int cost = partialMappingStitchingCost(pathway.transformedMapping, newTargetMapping, modifiedDistances, architectureEdges);
+				 //cost is however many swaps it took to get here + heuristic
+				 vector<vector<pair<int,int>>> allSwaps = pathway.swapsTaken;
+				 int numSwaps = 0;
+				 for (auto i = allSwaps.begin();i != allSwaps.end();i++) {
+					 numSwaps += (*i).size();
+				 }
+				 int cost = numSwaps +partialMappingStitchingCost(pathway.transformedMapping, newTargetMapping, modifiedDistances, croppedArchitecture) ;
 
 				 //enqueuing
 				 optimalQueue.push(SecondPriorityData(cost, pathway.swapsTaken, pathway.initialMapping, newTargetMapping, pathway.transformedMapping, get<2>(*j), toAdjust));
@@ -2705,8 +2598,12 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 break;
 				 }
 				 else {
-					 
-					 optimalQueue.push(SecondPriorityData(0, totalSwaps, pathway.initialMapping, map<int, int>(), newTransformedMapping, pathway.firstGates,pathway.endingSections));
+					 //need to determine number of swaps taken for cost 
+					 int numSwaps = 0;
+					 for (auto j = totalSwaps.begin();j != totalSwaps.end();j++) {
+						 numSwaps += (*j).size();
+					 }
+					 optimalQueue.push(SecondPriorityData(numSwaps, totalSwaps, pathway.initialMapping, map<int, int>(), newTransformedMapping, pathway.firstGates,pathway.endingSections));
 				 }
 			 
 			 
