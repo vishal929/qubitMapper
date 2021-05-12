@@ -95,6 +95,8 @@ void optimalCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> 
 
 queue<GateNode*> getSatisfiedGates(set<GateNode*> beginGates, set<GateNode*> endGates);
 
+void improvedOptimalCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates);
+
 
  //priority queue data structure for swaps
 	//our cost function is numSwapsSoFar + partialMappingStitchingCost(currentMap, targetMap)
@@ -114,6 +116,29 @@ queue<GateNode*> getSatisfiedGates(set<GateNode*> beginGates, set<GateNode*> end
 		 return cost > toCompare.cost; 
 	 }
 
+ };
+
+ struct BetterPriorityData {
+	 int cost;
+	 vector<vector<pair<int, int>>> swapsTaken;
+	 map<int, int> transformedMapping;
+	 map<int, int> targetMapping;
+	 set<GateNode*> firstGates;
+	 vector<set<GateNode*>> endingSections;
+
+	 BetterPriorityData(int cost, vector<vector<pair<int,int>>> swapsTaken, map<int,int> transformedMapping, map<int,int> targetMapping, set<GateNode*> firstGates, vector<set<GateNode*>> endingSections) {
+		 this->cost = cost;
+		 this->swapsTaken = swapsTaken;
+		 this->transformedMapping = transformedMapping;
+		 this->firstGates = firstGates;
+		 this->endingSections = endingSections;
+		 this->targetMapping = targetMapping;
+	 }
+
+	//reversing this operator because we want a min queue
+		 bool operator<(const struct BetterPriorityData& toCompare) const{
+			 return cost > toCompare.cost; 
+		 }
  };
 
  //priority queue struct format for optimal swap pathway finder
@@ -236,20 +261,22 @@ int main(int argc, char** argv) {
 	
 	/*Test for lazy circuit builder*/
 	//betterLazySwapCircuitBuilder(architectureEdges, firstGates);
-	improvedParallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
 	/*optimal test*/
-	/*
+	
 	cout << "Please enter 0 if you want the fast implementation (non-optimal), and enter 1 if you want the swap optimal approach\n";
 	int x;
 	cin >> x;
 	if (x == 0) {
-		parallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
+
+		improvedParallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
 	}
 	else {
 
-		optimalCircuitBuilder(architectureEdges, firstGates);
+		//optimalCircuitBuilder(architectureEdges, firstGates);
 		//optimalLazySwapCircuitBuilder(architectureEdges, firstGates);
-	}*/
+
+		improvedOptimalCircuitBuilder(architectureEdges, firstGates);
+	}
 
 	//testing maximal mapper
 	/*
@@ -1814,12 +1841,15 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 //idea: use a set to determine conflicts (since these swaps are in order)
 			//basic loop idea: go through the entire pathway, insert any swaps that do not conflict into a set
 	 //basic idea: start at a possible swap, any conflicting swap in the pathway must be in its own set, keep repeating 
-	 
-
+	 //printf("GOT HERE!\n");
 	 vector<set<pair<int, int>>> parallelizedSwaps;
+	 //printf("ALLOCATED VECTOR OF SETS!\n");
 	 set<pair<int, int>> addingSet;
+	 //printf("ERAI!\n");
 	 set<int> currentSet;
+	 int count = 0;
 	 while (true) {
+		 //printf("ITERATION %d: \n",count);
 		 if (swapPathway.size() == 0) {
 			 //we are done
 			 break;
@@ -1845,11 +1875,14 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					 break;
 			}
 		 }
+		 count++;
 		 parallelizedSwaps.push_back(addingSet);
 		 //resetting the set
-		 addingSet = set<pair<int, int>>();
+		 addingSet.clear();
+		 currentSet.clear();
+		 //addingSet = set<pair<int, int>>();
 		 //resetting the set of qubits used
-		 currentSet = set<int>();
+		 //currentSet = set<int>();
 
 		 
 	 }
@@ -2033,7 +2066,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	//this takes latencies into account and schedules the gates according to the latency
 	//interweave is true if swaps should try and be interleaved in a maximal partition
 	//if interweave is false, swaps are just tacked on to the end of a maximal partition
- void scheduleCircuit(vector<queue<GateNode*>> gateMappings,vector<vector<pair<int,int>>> levelSwaps,map<int,int> initialMapping,map<int,set<int>> architectureEdges) {
+ void scheduleCircuit(vector<set<GateNode*>>& gateMappings,vector<vector<pair<int,int>>> levelSwaps,map<int,int> initialMapping,map<int,set<int>>& architectureEdges) {
 	//idea, we just schedule level by level, and whatever is not finished after every cycle, we push to the next	
 		//this is the trivial scheduling for the non-interleaved case;
 	 //printf("latency single %d\n",latencySingle);
@@ -2056,23 +2089,29 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 //implementation of greedy scheduling  
 	 for (int i =0;i<gateMappings.size();i++) {
 		//putting queue into a set
-		 queue<GateNode*> satisfied = gateMappings[i];
-		 set<GateNode*> toSchedule;
+		 //queue<GateNode*> satisfied = gateMappings[i];
+		 //printf("GOT HERE!\n");
+		 set<GateNode*> toSchedule=gateMappings[i];
 		 set<GateNode*> inProgress;
 		 set<GateNode*> finished;
+		 //printf("WOOOO!\n");
+		 /*
 		 while (satisfied.size() > 0) {
 			 GateNode* toAdd = satisfied.front();
 			 satisfied.pop();
 			 toSchedule.insert(toAdd);
-		 }
+		 }*/
 
 		 vector<set<pair<int, int>>> parallelizedSwaps;
-
 		 if (i != gateMappings.size() - 1) {
+			 //printf("levelSwaps overall size:%d\n", levelSwaps.size());
+			// printf("iteration i: %d\n", i);
+			 //printf("levelSwaps size%d\n", levelSwaps.size());
+			//printf("STARTING TO PARALLELIZE SWAPS! with levelSwaps[i] size \n",levelSwaps[i].size());
 			 parallelizedSwaps = parallelizeSwapPathway(levelSwaps[i]);
-			
+			 //printf("SUCCESSFULLY PARALLELIZED SWAPS!\n");
 		 }
-
+		 
 		 //starting the scheduling
 		 int numTotalGates = toSchedule.size();
 		 int numSwapsAdded = 0;
@@ -2155,7 +2194,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 //we check here if we can put in a swap or not
 				//if a space is empty and the two qubits are not in use and they will not be in use for the rest, then we can safely insert the swap
 			 if (i != gateMappings.size() - 1) {
-				
+				 //printf("STARTING SWAP LOGIC!\n");
 				 //then we can consider swaps
 					 //we already have swaps separated by parallel swaps
 					 //so we try and do all the swaps in a section first, and then move on to the next set of swaps and so on
@@ -2223,6 +2262,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 //we have scheduled all that we can right now, let us move onto the decrement step for cycle logic
 				//we decrement all in progress gates by 1
 			 for (int z = 0; z < numLogical;z++) {
+				 //printf("CYCLE ITERATION %d\n", numCycles);
 				if (logicalSchedule[z].second > 0) {
 					//decrementing
 					GateNode* work = logicalSchedule[z].first;
@@ -2270,6 +2310,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 					
 				}
 			 }
+			 //printf("DONE WITH CYCLE!\n");
 			 
 			 //cycle is over 
 			 numCycles++;
@@ -2296,6 +2337,18 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 	 map<int, int> firstMap = one;
 	 map<int, int> transformedMap = one;
 	 map<int, int> secondMap = two;
+		
+	 /*
+	 printf("GET SWAP PATHWAYS!\n");
+	 printf("FIRST MAP!\n");
+	 for (auto i = one.begin();i != one.end();i++) {
+		 cout << i->first << ", " << i->second << "\n";
+	 }
+
+	 printf("SECOND MAP!\n");
+	 for (auto i = two.begin();i != two.end();i++) {
+		 cout << i->first << ", " << i->second << "\n";
+	 }*/
 
 
 	 //enqueueing the base state
@@ -2449,7 +2502,223 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
  
  }
 
- //
+ void improvedOptimalCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates) {
+	//we first get every single initial mapping from each maximal mapping	
+	 //for each initial mapping, we initialize a priority queue with transformed mapping and swaps etc
+		//so for each maximal mapping and initial mapping, we are able to minimize the swaps
+		//therefore, we exhaust all the initial options and then we are done
+	 queue < pair<map<int, int>, priority_queue<BetterPriorityData>>> mappingQueue;
+	 vector<vector<pair<int, int>>> bestSwaps;
+	 map<int, int> bestInitialMapping;
+	 vector<set<GateNode*>> bestEndingSections;
+	 //printf("INITIAL SIZE: %d\n", bestEndingSections.size());
+	 //just an indicator for the first part
+
+	 //doing initial setup
+	 vector<tuple<map<int, int>, set<int>, set<GateNode*>, set<GateNode*>>> results = maximalMapper(architectureEdges, startGates, false, set<GateNode*>());
+	 for (auto j = results.begin();j != results.end();j++) {
+		 vector<map<int, int>> filledMappings = fillPartialMapping(get<0>(*j), architectureEdges);
+		 set<GateNode*> ending = get<2>(*j);
+		 set<GateNode*> completed = get<3>(*j);
+		 for (auto i = ending.begin();i != ending.end();) {
+			 if (completed.find(*i) != completed.end()) {
+				 i = ending.erase(i);
+			 }
+			 else {
+				 i++;
+			 }
+		 }
+		 //checking for perfect mapping
+			
+		 if (ending.size() == 0) {
+			 printf("PERFECT MAPPING!\n");
+			 vector<set<GateNode*>> finished;
+			 finished.push_back(completed);
+			 scheduleCircuit(finished, vector<vector<pair<int, int>>>(), get<0>(*j), architectureEdges);
+			 return;
+		 }
+		 //adding every mapping and last gates set to the queue
+		 for (auto z = filledMappings.begin();z != filledMappings.end();z++) {
+			 map<int, set<int>> croppedArch = getCroppedArchitecture(*z, architectureEdges);
+			 map<pair<int, int>, int> distances = getDistances(croppedArch);
+			 //getting a second mapping and adding to the queue with heuristic cost
+			 vector<tuple<map<int, int>, set<int>, set<GateNode*>, set<GateNode*>>> furtherResults = maximalMapper(croppedArch, ending, false, completed);
+			 for (auto e = furtherResults.begin();e != furtherResults.end();e++) {
+				 //adding the second mappings to the queue with cost
+				 /*
+				 printf("GOT SECOND MAPPING!\n");
+				 for (auto l = get<0>(*e).begin();l != get<0>(*e).end();l++) {
+					 cout << l->first << " , " << l->second << "\n";
+				 }*/
+				 vector<set<GateNode*>> toAdd;
+				 toAdd.push_back(completed);
+				 toAdd.push_back(get<3>(*e));
+				 /*
+				 int numGates = 0;
+				 for (auto h = toAdd.begin();h != toAdd.end();h++) {
+					 numGates += (*h).size();
+				 }
+				 printf("INITIAL ENDING GATES PUSHED %d\n", numGates);
+				 */
+				 set<GateNode*> end = get<2>(*e);
+				 for (auto h = end.begin();h != end.end();) {
+					 if (completed.find(*h) != completed.end() || get<3>(*e).find(*h) != get<3>(*e).end()) {
+						 h = end.erase(h);
+					 }
+					 else {
+						 h++;
+					 }
+				 }
+				
+					priority_queue<BetterPriorityData> deeperQueue;
+					int heuristic = partialMappingStitchingCost(*z, get<0>(*e), distances, croppedArch);
+					map<int, int> initialMap = *z;
+					map<int, int> targetMap = get<0>(*e);
+					//printf("TARGET MAP SIZE: %d\n", targetMap.size());
+					deeperQueue.push(BetterPriorityData(heuristic, vector<vector<pair<int, int>>>(), initialMap,targetMap, end, toAdd));
+					mappingQueue.push(make_pair(initialMap, deeperQueue));
+				 
+			 }
+			 
+		 }
+	 }
+
+	 //printf("INITIAL MAPPING QUEUE SIZE! :%d\n",mappingQueue.size());
+
+	 //setup is over, we will now start the double queue stuff
+	 while (mappingQueue.size() > 0) {
+		 //printf("ITERATION!\n");
+		 //completely exhausting all inner mappings here first
+		 pair<map<int, int>, priority_queue<BetterPriorityData>> popped = mappingQueue.front();
+		 mappingQueue.pop();
+		 map<int, set<int>> croppedArch = getCroppedArchitecture(popped.first, architectureEdges);
+		 map<pair<int, int>, int> distances = getDistances(croppedArch);
+
+		 priority_queue<BetterPriorityData> deeperQueue = popped.second;
+		 
+		 while (deeperQueue.size() > 0) {
+			 //exhausting all possibilities for this mapping
+			 BetterPriorityData innerPopped = deeperQueue.top();
+			 deeperQueue.pop();
+
+			 //printf("INNER POPPED TARGET MAP SIZE: %d\n", innerPopped.targetMapping.size());
+			 //printf("INNER POPPED TRANSFORMED MAP SIZE: %d\n", innerPopped.transformedMapping.size());
+
+			 
+
+			 if (innerPopped.firstGates.size() == 0 && innerPopped.targetMapping.size()==0) {
+				 //then we are done, we found an optimal swap pathway for this given initial mapping
+				 int numSwaps = 0;
+				 for (auto z = innerPopped.swapsTaken.begin();z != innerPopped.swapsTaken.end();z++) {
+					 numSwaps += (*z).size();
+				 }
+				 int numBestSwaps = 0;
+				 for (auto z = bestSwaps.begin();z != bestSwaps.end();z++) {
+					 numBestSwaps += (*z).size();
+				 }
+				 if (bestEndingSections.size() == 0) {
+					 //then we just fill
+					 bestSwaps = innerPopped.swapsTaken;
+				     bestInitialMapping = popped.first;
+					 bestEndingSections = innerPopped.endingSections;
+				 }
+				 else if (numSwaps < numBestSwaps) {
+					 //we found better swap pathway
+					 bestSwaps = innerPopped.swapsTaken;
+				     bestInitialMapping = popped.first;
+					 bestEndingSections = innerPopped.endingSections;
+				 }
+				 int numGates = 0;
+				 for (auto z = innerPopped.endingSections.begin();z != innerPopped.endingSections.end();z++) {
+					 numGates += (*z).size();
+				 }
+				 //printf("FOUND GOOD PATH WITH NUM SWAPS %d and num sections %d, and total gates %d\n", numSwaps,innerPopped.endingSections.size(),numGates);
+				 break;
+			 }
+
+
+			 //else we call maximal mapper, stitch the swaps and enqueue
+			 set<GateNode*> completedSoFar; 
+			 for (auto i = innerPopped.endingSections.begin();i != innerPopped.endingSections.end();i++) {
+				 for (auto z = (*i).begin();z != (*i).end();z++) {
+					 completedSoFar.insert(*z);
+				 }
+			 }
+
+			 //then we stitch here and then the target mapping is empty
+			 /*
+			 printf("INNER SECOND MAPPING!\n");
+			 for (auto l = innerPopped.targetMapping.begin();l != innerPopped.targetMapping.end();l++) {
+				 cout << l->first << ", " << l->second << "\n";
+			 }*/
+			 vector<vector<pair<int, int>>> swapPathways = getSwapPathways(innerPopped.transformedMapping, innerPopped.targetMapping, distances, croppedArch);
+			 //printf("ENTIRE SWAP PATHWAY SIZE: %d\n", swapPathways.size());
+			 //performing swaps to transform our mapping
+			 for (auto z = swapPathways.begin();z != swapPathways.end();z++) {
+				 //printf("SIZE OF SWAP PATHWAY: %d\n", (*z).size());
+				 vector<vector<pair<int, int>>> newSwapsTaken = innerPopped.swapsTaken;
+				 newSwapsTaken.push_back(*z);
+				 map<int, int> toTransform = innerPopped.transformedMapping;
+				 for (auto y = (*z).begin();y != (*z).end();y++) {
+					// cout << "SWAP " << y->first << y->second << "\n";
+					 int tmp = toTransform[y->first];
+					 toTransform[y->first] = toTransform[y->second];
+					 toTransform[y->second] = tmp;
+				 }
+				 //enqueuing from this pathway
+				 int numSwaps = 0;
+				 for (auto i = newSwapsTaken.begin();i != newSwapsTaken.end();i++) {
+					 numSwaps += (*i).size();
+				 }
+				 //getting the next maximal mapping  if lastGates is not empty
+				 if (innerPopped.firstGates.size() != 0) {
+					vector<tuple<map<int, int>, set<int>, set<GateNode*>, set<GateNode*>>> results = maximalMapper(croppedArch, innerPopped.firstGates, false, completedSoFar);
+
+					//enqueuing each with heuristic cost + numSwaps
+					 for (auto h = results.begin();h != results.end();h++) {
+						 set<GateNode*> ending = get<2>(*h);
+						 set<GateNode*> completed = get<3>(*h);
+						 for (auto z = ending.begin();z != ending.end();) {
+							 if (completed.find(*z) != completed.end() || completedSoFar.find(*z) != completedSoFar.end()) {
+								 z = ending.erase(z);
+							 }
+							 else {
+								 z++;
+							 }
+						 }
+
+						 vector<set<GateNode*>> endings = innerPopped.endingSections;
+						 endings.push_back(completed);
+						 int heuristic = partialMappingStitchingCost(toTransform, get<0>(*h), distances, croppedArch);
+						 deeperQueue.push(BetterPriorityData(numSwaps + heuristic, newSwapsTaken, toTransform, get<0>(*h), ending, endings));
+					 }
+				 }
+				 else {
+					 //we enqeueu with empty mapping and num swaps
+					 deeperQueue.push(BetterPriorityData(numSwaps, newSwapsTaken, toTransform, map<int, int>(), innerPopped.firstGates, innerPopped.endingSections));
+				 }
+				 
+				 
+			 }
+			 
+
+			 
+			 
+
+		 }
+	 }
+	 //printf("FINAL SECTIONS SIZE %d\n", bestEndingSections.size());
+
+	 //now we have the best mapping pathway possible
+	 map<int, set<int>> croppedArch = getCroppedArchitecture(bestInitialMapping, architectureEdges);
+	 scheduleCircuit(bestEndingSections, bestSwaps, bestInitialMapping, croppedArch);
+
+
+	 
+
+ }
+
+/*
  void optimalCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates) {
 	//using priority_queue to push down pathways
 	 map<pair<int, int>, int> distances = getDistances(architectureEdges);
@@ -2554,9 +2823,9 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 			 }
 		 }
 	 }
- }
+ }*/
 
-
+/*
  //this is a swap optimal version of betterLazySwapCircuitBuilder
  void optimalLazySwapCircuitBuilder(map<int, set<int>> architectureEdges, set<GateNode*> startGates) {
 	//using priority_queue to push down pathways
@@ -2711,7 +2980,7 @@ map<int,set<int>> addGateEdge(GateNode* chosen, map<int,set<int>>circuitEdges) {
 		 cout << "LOGICAL q" << i->first << " mapped to physical Q" << i->second<<"\n";
 	 }
 
- }
+ }*/
 
 void improvedParallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArchitectureEdges, set<GateNode*> startGates) {
 	//will eventually need to print this out
@@ -2740,6 +3009,23 @@ void improvedParallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArc
 	 map<int, set<int>> architectureEdges = originalArchitectureEdges;
 
 	 while (currentGates.size() > 0) {
+		 if (totalCompleted.size() > 1000) {
+			 set<GateNode*> otherSet;
+			 //optimization just to reduce memory usage
+
+			 //if a gate has both its children in this set, then we can remove it
+			 //on the other hand, if a node does not have both children in the set, then we can keep it
+			 for (auto i = totalCompleted.begin();i != totalCompleted.end();i++) {
+				 bool notBoth = false;
+				 if (((*i)->controlChild != NULL && totalCompleted.find((*i)->controlChild) == totalCompleted.end()) || ((*i)->targetChild != NULL && totalCompleted.find((*i)->targetChild) == totalCompleted.end())) {
+					 otherSet.insert(*i);
+				 }
+				
+			 }
+
+			 //swapping sets
+			 totalCompleted = otherSet;
+		 }
 
 		 if (initialMapping.size() == 0) {
 			 //need to get initial maximal mapping
@@ -3543,7 +3829,7 @@ void improvedParallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArc
 	 }
 	
  }
-
+/*
  //my faster version of the optimal solver
  void betterLazySwapCircuitBuilder(map<int,set<int>> originalArchitectureEdges, set<GateNode*> startGates) {
  //since our initial mapping varies until everything is mapped, we have to print out gates at the end
@@ -3667,11 +3953,11 @@ void improvedParallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArc
 	 for (auto z = initialMapping.begin();z != initialMapping.end();z++) {
 		 cout << "Logical qubit q" << z->first << " mapped to physical qubit Q" << z->second <<"\n";
 	 }
- }
+ }*/
 
 
 
-
+/*
  //function to test my maximal mapper
 	//it should return mappings for every maximal portion of the circuit that can be executed without swaps
  queue<map<int, int>> getMaximalMappings(set<GateNode*> startGates,map<int,set<int>> architectureEdges) {
@@ -3746,6 +4032,6 @@ void improvedParallelSchedulingFastCircuitBuilder(map<int, set<int>> originalArc
 	 }
 
 	 return make_pair(numCycles,numSwaps);
-}
+}*/
 
  
