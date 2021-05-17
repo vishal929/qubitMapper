@@ -214,10 +214,10 @@ int main(int argc, char** argv) {
 	
 	
 	/*Test for fast*/
-	improvedParallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
+	//improvedParallelSchedulingFastCircuitBuilder(architectureEdges, firstGates);
 	/*optimal test*/
 	//improvedOptimalCircuitBuilder(architectureEdges, firstGates);
-	/*
+	
 	cout << "Please enter 0 if you want the fast implementation (non-optimal), and enter 1 if you want the swap optimal approach\n";
 	int x;
 	cin >> x;
@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
 
 		improvedOptimalCircuitBuilder(architectureEdges, firstGates);
 	}
-	*/
+	
 
 	//testing maximal mapper
 	/*
